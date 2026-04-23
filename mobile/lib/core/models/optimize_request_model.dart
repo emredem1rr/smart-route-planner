@@ -18,6 +18,7 @@ class OptimizationConfig {
   final double saInitialTemp;
   final double saCoolingRate;
   final bool   useRealRoads;
+  final bool   useTraffic;
 
   OptimizationConfig({
     this.heuristic      = 'euclidean',
@@ -26,7 +27,8 @@ class OptimizationConfig {
     this.mutationRate   = 0.02,
     this.saInitialTemp  = 1000.0,
     this.saCoolingRate  = 0.995,
-    this.useRealRoads   = true,   // Artık default true
+    this.useRealRoads   = true,
+    this.useTraffic     = false,
   });
 
   Map<String, dynamic> toJson() => {
@@ -37,6 +39,7 @@ class OptimizationConfig {
     'sa_initial_temp' : saInitialTemp,
     'sa_cooling_rate' : saCoolingRate,
     'use_real_roads'  : useRealRoads,
+    'use_traffic'     : useTraffic,
   };
 }
 

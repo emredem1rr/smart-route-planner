@@ -17,13 +17,39 @@ class BenchmarkScreen extends StatefulWidget {
 
 class _BenchmarkScreenState extends State<BenchmarkScreen> {
   bool          _loading = false;
-  int           _elapsed = 0;   // saniye cinsinden geçen süre
+  int           _elapsed = 0;
   Timer?        _timer;
   List<dynamic> _results = [];
   String        _dataset = '';
   int           _nCities = 0;
   String        _winner  = '';
   String?       _error;
+
+  // Dataset seçimi
+  String _selectedDataset = 'berlin52';
+  static const _datasetInfo = {
+    'berlin52': {
+      'label'  : 'Berlin52',
+      'desc'   : '52 şehir · Optimal = 7.542',
+      'n'      : 52,
+      'optimal': 7542,
+      'endpoint': '/benchmark/berlin52',
+    },
+    'kroa100': {
+      'label'  : 'kroA100',
+      'desc'   : '100 şehir · Optimal = 21.282',
+      'n'      : 100,
+      'optimal': 21282,
+      'endpoint': '/benchmark/kroa100',
+    },
+    'pr76': {
+      'label'  : 'pr76',
+      'desc'   : '76 şehir · Optimal = 108.159',
+      'n'      : 76,
+      'optimal': 108159,
+      'endpoint': '/benchmark/pr76',
+    },
+  };
 
   // Kullanıcının grafik için seçtiği algoritmalar
   final Set<String> _selectedAlgos = {
@@ -89,9 +115,10 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() => _elapsed++);
     });
+    final endpoint = _datasetInfo[_selectedDataset]!['endpoint'] as String;
     try {
       final response = await http
-          .get(Uri.parse('${ApiConstants.optimizationBaseUrl}/benchmark/berlin52'))
+          .get(Uri.parse('${ApiConstants.optimizationBaseUrl}$endpoint'))
           .timeout(const Duration(seconds: 300));
       final json = jsonDecode(response.body);
       if (json['success'] == true) {
@@ -250,32 +277,67 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
               Divider(height: 24, color: border),
             ],
 
-            // ── Bilgi kartı ──────────────────────────────
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color:        AppColors.info.withOpacity(0.07),
-                borderRadius: BorderRadius.circular(14),
-                border:       Border.all(color: AppColors.info.withOpacity(0.25)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(children: [
-                    const Icon(Icons.science_outlined, color: AppColors.info, size: 18),
-                    const SizedBox(width: 8),
-                    Text('Berlin52 Testi',
-                        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: AppColors.info)),
-                  ]),
-                  const SizedBox(height: 8),
-                  Text(
-                    '52 şehirli klasik TSP problemi. Optimal çözüm = 7542 birim. '
-                        '5 algoritmanın optimale yakınlığını ve hızını karşılaştırır.',
-                    style: TextStyle(color: ts, fontSize: 13, height: 1.4),
+            // ── Dataset Seçici ───────────────────────────
+            Row(children: [
+              Text('Dataset:', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: tp)),
+              const SizedBox(width: 10),
+              ..._datasetInfo.entries.map((e) {
+                final sel   = _selectedDataset == e.key;
+                final label = e.value['label'] as String;
+                return GestureDetector(
+                  onTap: () => setState(() => _selectedDataset = e.key),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 120),
+                    margin: const EdgeInsets.only(right: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color:        sel ? AppColors.orange.withOpacity(0.15) : Colors.transparent,
+                      borderRadius: BorderRadius.circular(20),
+                      border:       Border.all(
+                        color: sel ? AppColors.orange : border,
+                        width: sel ? 1.5 : 1,
+                      ),
+                    ),
+                    child: Text(label, style: TextStyle(
+                      fontSize: 12,
+                      color:      sel ? AppColors.orange : ts,
+                      fontWeight: sel ? FontWeight.w700 : FontWeight.w400,
+                    )),
                   ),
-                ],
-              ),
-            ),
+                );
+              }),
+            ]),
+            const SizedBox(height: 12),
+
+            // ── Bilgi kartı ──────────────────────────────
+            Builder(builder: (_) {
+              final info = _datasetInfo[_selectedDataset]!;
+              return Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color:        AppColors.info.withOpacity(0.07),
+                  borderRadius: BorderRadius.circular(14),
+                  border:       Border.all(color: AppColors.info.withOpacity(0.25)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(children: [
+                      const Icon(Icons.science_outlined, color: AppColors.info, size: 18),
+                      const SizedBox(width: 8),
+                      Text('${info['label']} Testi',
+                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: AppColors.info)),
+                    ]),
+                    const SizedBox(height: 8),
+                    Text(
+                      '${info['n']} şehirli TSP problemi. Optimal = ${info['optimal']}. '
+                      '5 algoritmanın optimale yakınlığını (gap%) ve hızını karşılaştırır.',
+                      style: TextStyle(color: ts, fontSize: 13, height: 1.4),
+                    ),
+                  ],
+                ),
+              );
+            }),
             const SizedBox(height: 14),
 
             // ── Başlat butonu ────────────────────────────
@@ -312,7 +374,7 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('Genetik · SA · ACO · Tabu · LKH test ediliyor...',
+                  Text('${_datasetInfo[_selectedDataset]!['label']} · 5 algoritma test ediliyor...',
                       style: TextStyle(color: ts, fontSize: 12)),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),

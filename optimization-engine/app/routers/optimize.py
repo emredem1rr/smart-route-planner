@@ -3,7 +3,8 @@ import asyncio
 
 from fastapi import APIRouter
 from ..core.models              import OptimizeRequest, OptimizeResponse, RouteResult, AlgorithmLog
-from ..core.distance_matrix     import build_distance_matrix, build_distance_matrix_async, get_route_geometry
+from ..core.distance_matrix     import (build_distance_matrix, build_distance_matrix_async,
+                                        build_traffic_matrix_async, get_route_geometry)
 from ..core.fitness             import calculate_fitness, calculate_route_stats
 from ..algorithms.genetic             import run_genetic_algorithm
 from ..algorithms.simulated_annealing import run_simulated_annealing
@@ -31,17 +32,25 @@ async def run_comparison(request: OptimizeRequest) -> OptimizeResponse:
     duration_matrix = None
     if use_real:
         try:
-            dist_matrix, duration_matrix = await asyncio.wait_for(
-                build_distance_matrix_async(request.start_location, tasks),
-                timeout=20.0,
-            )
-            print(f"[OSRM] Gerçek yol matrisi: {len(tasks)+1}×{len(tasks)+1}")
+            if config.use_traffic:
+                # Trafik verisiyle Google Distance Matrix
+                dist_matrix, duration_matrix = await asyncio.wait_for(
+                    build_traffic_matrix_async(request.start_location, tasks),
+                    timeout=30.0,
+                )
+                print(f"[Traffic] Trafik matrisi: {len(tasks)+1}×{len(tasks)+1}")
+            else:
+                dist_matrix, duration_matrix = await asyncio.wait_for(
+                    build_distance_matrix_async(request.start_location, tasks),
+                    timeout=20.0,
+                )
+                print(f"[OSRM] Gerçek yol matrisi: {len(tasks)+1}×{len(tasks)+1}")
         except asyncio.TimeoutError:
-            print("[OSRM] Timeout — haversine fallback")
+            print("[Matrix] Timeout — haversine fallback")
             dist_matrix = build_distance_matrix(request.start_location, tasks)
             use_real    = False
         except Exception as e:
-            print(f"[OSRM] Hata: {e} — haversine fallback")
+            print(f"[Matrix] Hata: {e} — haversine fallback")
             dist_matrix = build_distance_matrix(request.start_location, tasks)
             use_real    = False
     else:

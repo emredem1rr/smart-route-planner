@@ -34,6 +34,7 @@ class OptimizationConfig(BaseModel):
     sa_initial_temp: float = 1000.0
     sa_cooling_rate: float = 0.995
     use_real_roads:  bool  = True
+    use_traffic:     bool  = False   # Google Distance Matrix API ile trafik
 
 
 class OptimizeRequest(BaseModel):

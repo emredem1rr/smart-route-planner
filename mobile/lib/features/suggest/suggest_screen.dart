@@ -109,6 +109,7 @@ class _SuggestScreenState extends State<SuggestScreen> with AutomaticKeepAliveCl
   final _cityCtrl     = TextEditingController();
   final _districtCtrl = TextEditingController();
   final _maxCtrl      = TextEditingController(text: '8');
+  final _nlCtrl       = TextEditingController();
 
   final Set<String> _activeCategories = {'yemek'};
   List<String>    _cityHistory = [];
@@ -117,6 +118,19 @@ class _SuggestScreenState extends State<SuggestScreen> with AutomaticKeepAliveCl
   int             _radiusKm    = 0;
   UserPreferences _prefs       = UserPreferences();
   String          _lastCity    = '';
+
+  // AI Filtreler
+  final Set<String> _activeFilters = {};
+  static const _availableFilters = [
+    'çocuğa uygun', 'aile dostu', 'gençler için', 'sessiz ortam',
+    'vejetaryen', 'engelli erişimi', 'evcil hayvan dostu', 'wifi var', 'açık alan',
+  ];
+
+  // Doğal Dil Arama
+  bool _nlSearchMode = false;
+
+  // Trafik
+  bool _useTraffic = false;
 
   // Her kategori için ayrı state
   final Map<String, List<PlaceItem>> _catPlaces  = {};
@@ -150,7 +164,7 @@ class _SuggestScreenState extends State<SuggestScreen> with AutomaticKeepAliveCl
 
   @override
   void dispose() {
-    _cityCtrl.dispose(); _districtCtrl.dispose(); _maxCtrl.dispose();
+    _cityCtrl.dispose(); _districtCtrl.dispose(); _maxCtrl.dispose(); _nlCtrl.dispose();
     super.dispose();
   }
 
@@ -309,6 +323,7 @@ class _SuggestScreenState extends State<SuggestScreen> with AutomaticKeepAliveCl
           'api_key'     : ApiConstants.googleApiKey,
           'max_results' : int.tryParse(_maxCtrl.text) ?? 8,
           'preferences' : _prefs.toJson(),
+          'filters'     : _activeFilters.toList(),
         }),
       ).timeout(const Duration(seconds: 120));
 
@@ -525,7 +540,7 @@ class _SuggestScreenState extends State<SuggestScreen> with AutomaticKeepAliveCl
         tasks:  tasks,
         config: OptimizationConfig(
             heuristic: 'euclidean', populationSize: 50,
-            generations: 100, useRealRoads: true),
+            generations: 100, useRealRoads: true, useTraffic: _useTraffic),
       ));
       if (!mounted) return;
 
@@ -642,11 +657,13 @@ class _SuggestScreenState extends State<SuggestScreen> with AutomaticKeepAliveCl
       ),
       body: Column(children: [
         _buildSearchBar(surf, border, tp, ts),
+        if (_nlSearchMode) _buildNLSearchBar(surf, border, tp, ts),
+        _buildFilterBar(surf, border, tp, ts),
         _buildCategoryBar(surf, border, tp, ts),
         _buildSubcategoryBar(surf, border, tp, ts),
         _buildRadiusBar(surf, border, tp, ts),
         Expanded(child: _buildContent(surf, border, tp, ts)),
-        if (_places.isNotEmpty && !_loading) _buildRouteButton(),
+        if (_places.isNotEmpty && !_loading) _buildRouteButton(surf, border, tp, ts),
       ]),
     );
   }
@@ -716,21 +733,177 @@ class _SuggestScreenState extends State<SuggestScreen> with AutomaticKeepAliveCl
             ),
           ),
         const SizedBox(height: 10),
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton.icon(
-            onPressed: _loading ? null : _search,
-            icon:  const Icon(Icons.auto_awesome, size: 17),
-            label: const Text('AI ile Keşfet',
-                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+        Row(children: [
+          Expanded(
+            child: ElevatedButton.icon(
+              onPressed: _loading ? null : _search,
+              icon:  const Icon(Icons.auto_awesome, size: 17),
+              label: const Text('AI ile Keşfet',
+                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF6366F1),
+                foregroundColor: Colors.white,
+                padding:   const EdgeInsets.symmetric(vertical: 14),
+                elevation: 0,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          GestureDetector(
+            onTap: () => setState(() => _nlSearchMode = !_nlSearchMode),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+              decoration: BoxDecoration(
+                color:        _nlSearchMode ? const Color(0xFF6366F1).withOpacity(0.15) : surf,
+                borderRadius: BorderRadius.circular(12),
+                border:       Border.all(
+                  color: _nlSearchMode ? const Color(0xFF6366F1) : border,
+                  width: _nlSearchMode ? 1.5 : 1,
+                ),
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.record_voice_over_rounded, size: 16,
+                    color: _nlSearchMode ? const Color(0xFF6366F1) : ts),
+                const SizedBox(width: 4),
+                Text('NL', style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: _nlSearchMode ? const Color(0xFF6366F1) : ts,
+                )),
+              ]),
+            ),
+          ),
+        ]),
+      ]),
+    );
+  }
+
+  Widget _buildNLSearchBar(Color surf, Color border, Color tp, Color ts) {
+    return Container(
+      color: surf,
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('Doğal Dil Arama',
+            style: TextStyle(color: const Color(0xFF6366F1), fontWeight: FontWeight.w700, fontSize: 12)),
+        const SizedBox(height: 6),
+        Row(children: [
+          Expanded(
+            child: TextField(
+              controller: _nlCtrl,
+              style: TextStyle(color: tp, fontSize: 13),
+              decoration: InputDecoration(
+                hintText: 'Örn: çocuklu aileler için sessiz kafe İstanbul Kadıköy',
+                hintStyle: TextStyle(color: ts, fontSize: 12),
+                prefixIcon: Icon(Icons.search, color: ts, size: 17),
+                filled: true, fillColor: surf,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                border:        OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: border)),
+                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: border)),
+                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFF6366F1), width: 1.5)),
+              ),
+              onSubmitted: (_) => _searchNL(),
+            ),
+          ),
+          const SizedBox(width: 8),
+          ElevatedButton(
+            onPressed: _loading ? null : _searchNL,
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF6366F1),
               foregroundColor: Colors.white,
-              padding:   const EdgeInsets.symmetric(vertical: 14),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
               elevation: 0,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             ),
+            child: const Icon(Icons.send_rounded, size: 17),
           ),
+        ]),
+      ]),
+    );
+  }
+
+  Future<void> _searchNL() async {
+    final query = _nlCtrl.text.trim();
+    if (query.isEmpty) return;
+    final cat = _category;
+    setState(() => _catLoading[cat] = true);
+    try {
+      final resp = await http.post(
+        Uri.parse('${ApiConstants.optimizationBaseUrl}/suggest/natural-language'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'query'       : query,
+          'api_key'     : ApiConstants.googleApiKey,
+          'max_results' : int.tryParse(_maxCtrl.text) ?? 8,
+          'preferences' : _prefs.toJson(),
+        }),
+      ).timeout(const Duration(seconds: 120));
+      final data = jsonDecode(resp.body);
+      if (data['success'] == true) {
+        final places  = (data['places'] as List).map((p) => PlaceItem.fromJson(p)).toList();
+        final summary = data['summary'] as String? ?? '';
+        if (mounted) setState(() {
+          _catPlaces[cat]  = places;
+          _catSummary[cat] = summary;
+          _catError[cat]   = null;
+        });
+      } else {
+        if (mounted) setState(() => _catError[cat] = data['error'] ?? 'Hata oluştu.');
+      }
+    } catch (e) {
+      if (mounted) setState(() => _catError[cat] = 'Bağlantı hatası: $e');
+    } finally {
+      if (mounted) setState(() => _catLoading[cat] = false);
+    }
+  }
+
+  Widget _buildFilterBar(Color surf, Color border, Color tp, Color ts) {
+    return Container(
+      color: surf,
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Icon(Icons.filter_list_rounded, size: 13, color: ts),
+          const SizedBox(width: 5),
+          Text('AI Filtreler', style: TextStyle(color: ts, fontSize: 11, fontWeight: FontWeight.w600)),
+          if (_activeFilters.isNotEmpty) ...[
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: () => setState(() => _activeFilters.clear()),
+              child: const Text('Temizle',
+                  style: TextStyle(color: Color(0xFF6366F1), fontSize: 10, fontWeight: FontWeight.w600)),
+            ),
+          ],
+        ]),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 5, runSpacing: 4,
+          children: _availableFilters.map((f) {
+            final sel = _activeFilters.contains(f);
+            return GestureDetector(
+              onTap: () => setState(() {
+                if (sel) _activeFilters.remove(f); else _activeFilters.add(f);
+              }),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 120),
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                decoration: BoxDecoration(
+                  color:        sel ? const Color(0xFF6366F1).withOpacity(0.12) : Colors.transparent,
+                  borderRadius: BorderRadius.circular(14),
+                  border:       Border.all(
+                    color: sel ? const Color(0xFF6366F1) : border,
+                    width: sel ? 1.5 : 1,
+                  ),
+                ),
+                child: Text(f, style: TextStyle(
+                  fontSize: 11,
+                  color:      sel ? const Color(0xFF6366F1) : ts,
+                  fontWeight: sel ? FontWeight.w700 : FontWeight.w400,
+                )),
+              ),
+            );
+          }).toList(),
         ),
       ]),
     );
@@ -1313,30 +1486,47 @@ class _SuggestScreenState extends State<SuggestScreen> with AutomaticKeepAliveCl
     );
   }
 
-  Widget _buildRouteButton() {
+  Widget _buildRouteButton(Color surf, Color border, Color tp, Color ts) {
     final count = _places.where((p) => p.selected).length;
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
       decoration: BoxDecoration(
-        color:  AppColors.surface(context),
-        border: Border(top: BorderSide(color: AppColors.border(context))),
+        color:  surf,
+        border: Border(top: BorderSide(color: border)),
       ),
-      child: SizedBox(
-        width: double.infinity,
-        child: ElevatedButton.icon(
-          onPressed: _optimizeRoute,
-          icon:  const Icon(Icons.route_rounded, size: 18),
-          label: Text('Rotayı Optimize Et ($count mekan)',
-              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.success,
-            foregroundColor: Colors.white,
-            padding:   const EdgeInsets.symmetric(vertical: 14),
-            elevation: 0,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        // Trafik seçeneği
+        Row(children: [
+          Icon(Icons.traffic_rounded, size: 15,
+              color: _useTraffic ? AppColors.warn : ts),
+          const SizedBox(width: 6),
+          Text('Trafik Ağırlıklı Rota', style: TextStyle(color: tp, fontSize: 12)),
+          const Spacer(),
+          Switch(
+            value:       _useTraffic,
+            onChanged:   (v) => setState(() => _useTraffic = v),
+            activeColor: AppColors.warn,
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+        ]),
+        const SizedBox(height: 6),
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton.icon(
+            onPressed: _optimizeRoute,
+            icon:  const Icon(Icons.route_rounded, size: 18),
+            label: Text('Rotayı Optimize Et ($count mekan)',
+                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.success,
+              foregroundColor: Colors.white,
+              padding:   const EdgeInsets.symmetric(vertical: 14),
+              elevation: 0,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
           ),
         ),
-      ),
+      ]),
     );
   }
 
