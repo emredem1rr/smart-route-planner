@@ -1,0 +1,36 @@
+cd C:\Users\demir\Desktop\smart-route-planner\optimization-engine
+venv\Scripts\Activate.ps1
+
+python -m uvicorn app.main:app --port 8000 --timeout-keep-alive 600 --workers 1
+
+gerçek cihaz için her şeyi dinlemek için
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --timeout-keep-alive 600 --workers 1
+
+
+cd C:\Users\demir\Desktop\smart-route-planner\api-gateway
+npm run dev
+
+Emülatörde çalıştırırken:
+
+cd C:\Users\demir\Desktop\smart-route-planner\mobile
+flutter run --dart-define=IS_EMULATOR=true
+
+Gerçek cihazda (adb reverse ile):
+C:\Users\demir\AppData\Local\Android\Sdk\platform-tools\adb reverse tcp:3000 tcp:3000
+C:\Users\demir\AppData\Local\Android\Sdk\platform-tools\adb reverse tcp:8000 tcp:8000
+flutter run
+
+
+yusuf hoca tel
+C:\Users\demir\AppData\Local\Android\Sdk\platform-tools\adb -s RFCXA1C9A6T reverse tcp:3000 tcp:3000
+C:\Users\demir\AppData\Local\Android\Sdk\platform-tools\adb -s RFCXA1C9A6T reverse tcp:8000 tcp:8000
+flutter run -d RFCXA1C9A6T --dart-define=REAL_DEVICE=true
+
+Emülatör flutter run 
+
+Kablolu telefon 
+C:\Users\demir\AppData\Local\Android\Sdk\platform-tools\adb -s RFCXA1C9A6T reverse tcp:3000 tcp:3000
+C:\Users\demir\AppData\Local\Android\Sdk\platform-tools\adb -s RFCXA1C9A6T reverse tcp:8000 tcp:8000
+flutter run -d RFCXA1C9A6T --dart-define=REAL_DEVICE=true
+
+APK yükle flutter build apk --dart-define=PC_IP=192.168.1.45
