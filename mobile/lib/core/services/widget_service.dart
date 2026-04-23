@@ -5,8 +5,13 @@ class WidgetService {
   static const String _appGroupId   = 'com.example.mobile';
   static const String _widgetName   = 'SmartRouteWidget';
 
-  /// Bugünün görevlerini widget'a yaz
-  static Future<void> updateWidget(List<TaskModel> tasks) async {
+  /// Bugünün görevlerini widget'a yaz.
+  /// [routeDistanceKm] ve [routeDurationMin] opsiyonel rota özeti için.
+  static Future<void> updateWidget(
+    List<TaskModel> tasks, {
+    double routeDistanceKm  = 0.0,
+    double routeDurationMin = 0.0,
+  }) async {
     try {
       await HomeWidget.setAppGroupId(_appGroupId);
 
@@ -18,6 +23,16 @@ class WidgetService {
       await HomeWidget.saveWidgetData<int>('task_total',   total);
       await HomeWidget.saveWidgetData<int>('task_done',    done);
       await HomeWidget.saveWidgetData<int>('task_pending', pending.length);
+
+      // Rota özeti satırı
+      final routeSummary = pending.isNotEmpty
+          ? (routeDurationMin > 0
+              ? 'Bugün ${pending.length} görevin var, toplam ~${routeDurationMin.round()} dk'
+              : 'Bugün ${pending.length} görevin var')
+          : 'Bugün görevin yok';
+      await HomeWidget.saveWidgetData<String>('route_summary_line', routeSummary);
+      await HomeWidget.saveWidgetData<double>('route_distance_km',  routeDistanceKm);
+      await HomeWidget.saveWidgetData<int>('route_duration_min',    routeDurationMin.round());
 
       // İlk 3 görevi yaz
       for (int i = 0; i < 3; i++) {

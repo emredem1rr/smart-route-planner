@@ -256,23 +256,25 @@ class _RouteResultScreenState extends State<RouteResultScreen>
   // ── Paylaşım ───────────────────────────────────────────────
 
   String _buildShareText(RouteResult sonuc) {
-    final b = StringBuffer();
-    b.writeln('🗺️ Smart Route — Optimize Edilmiş Rota');
-    b.writeln('─────────────────────────────');
-    b.writeln('📍 Toplam Mesafe: ${sonuc.totalDistance.toStringAsFixed(2)} km');
-    b.writeln('⏱️ Toplam Süre: ${sonuc.totalTravelTime.toStringAsFixed(0)} dakika');
-    b.writeln('🤖 Algoritma: ${_algoLabel(sonuc.algorithmUsed)}');
-    b.writeln('🛣️ Mesafe Tipi: ${sonuc.usedRealRoads ? 'Gerçek Yol (OSRM)' : 'Kuş Uçuşu'}');
-    b.writeln('─────────────────────────────');
-    b.writeln('📋 Görev Sırası:');
+    final b   = StringBuffer('Bugünkü rotam 📍\n\n');
+    final now = DateTime.now();
+    int cumMin = now.hour * 60 + now.minute;
+
     for (int i = 0; i < _orderedTasks.length; i++) {
-      final task = _orderedTasks[i];
-      b.writeln('${i + 1}. ${task.name}');
+      final task   = _orderedTasks[i];
+      final segMin = (sonuc.segmentTimes != null && i < sonuc.segmentTimes!.length)
+          ? sonuc.segmentTimes![i].round() : 0;
+      cumMin += segMin;
+      final h = (cumMin ~/ 60 % 24).toString().padLeft(2, '0');
+      final m = (cumMin % 60).toString().padLeft(2, '0');
+      b.writeln('${i + 1}.Durak: ${task.name} ($h:$m)');
       if (task.address.isNotEmpty) b.writeln('   📍 ${task.address}');
-      b.writeln('   🔗 https://maps.google.com/?q=${task.latitude},${task.longitude}');
     }
-    b.writeln('─────────────────────────────');
-    b.writeln('Smart Route Planner ile oluşturuldu.');
+
+    b.writeln('\nToplam: ${sonuc.totalDistance.toStringAsFixed(1)} km, '
+        '${sonuc.totalTravelTime.round()} dk '
+        '(${_algoLabel(sonuc.algorithmUsed)})');
+    b.writeln('\nSmart Route Planner ile oluşturuldu.');
     return b.toString();
   }
 
@@ -603,6 +605,56 @@ class _RouteResultScreenState extends State<RouteResultScreen>
             child: _summaryCard(sonuc, surf, border, tp, ts),
           ),
         ),
+        if (sonuc.aiExplanation != null && sonuc.aiExplanation!.isNotEmpty)
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      const Color(0xFF6366F1).withOpacity(0.08),
+                      const Color(0xFF8B5CF6).withOpacity(0.05),
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                      color: const Color(0xFF6366F1).withOpacity(0.25)),
+                ),
+                child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Container(
+                    width: 32, height: 32,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF6366F1).withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.auto_awesome,
+                        color: Color(0xFF6366F1), size: 16),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('AI Rota Açıklaması',
+                            style: TextStyle(
+                              color: const Color(0xFF6366F1),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            )),
+                        const SizedBox(height: 4),
+                        Text(sonuc.aiExplanation!,
+                            style: TextStyle(color: tp, fontSize: 13, height: 1.45)),
+                      ],
+                    ),
+                  ),
+                ]),
+              ),
+            ),
+          ),
         SliverToBoxAdapter(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),

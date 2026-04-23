@@ -305,25 +305,45 @@ class _SuggestScreenState extends State<SuggestScreen> with AutomaticKeepAliveCl
     _prefetchOtherCategories(city);
   }
 
+  /// API gateway'den görev geçmişini çek (kişiselleştirme için).
+  Future<List<Map<String, dynamic>>> _fetchTaskHistory() async {
+    try {
+      final token = await StorageService().getToken();
+      if (token == null) return [];
+      final resp = await http.get(
+        Uri.parse('${ApiConstants.baseUrl}/api/tasks'),
+        headers: {'Authorization': 'Bearer $token'},
+      ).timeout(const Duration(seconds: 8));
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body);
+        final list = (data is List ? data : data['tasks'] as List? ?? []);
+        return list.cast<Map<String, dynamic>>().take(50).toList();
+      }
+    } catch (_) {}
+    return [];
+  }
+
   Future<void> _fetchAndCache(
       String city, String category, String subcategory, int radius, String cacheKey,
       {required bool background}
       ) async {
     if (!background && mounted) setState(() => _catLoading[category] = true);
     try {
+      final taskHistory = await _fetchTaskHistory();
       final resp = await http.post(
         Uri.parse('${ApiConstants.optimizationBaseUrl}/suggest'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
-          'city'        : city,
-          'district'    : _districtCtrl.text.trim(),
-          'category'    : category,
-          'subcategory' : subcategory,
-          'radius_km'   : radius,
-          'api_key'     : ApiConstants.googleApiKey,
-          'max_results' : int.tryParse(_maxCtrl.text) ?? 8,
-          'preferences' : _prefs.toJson(),
-          'filters'     : _activeFilters.toList(),
+          'city'         : city,
+          'district'     : _districtCtrl.text.trim(),
+          'category'     : category,
+          'subcategory'  : subcategory,
+          'radius_km'    : radius,
+          'api_key'      : ApiConstants.googleApiKey,
+          'max_results'  : int.tryParse(_maxCtrl.text) ?? 8,
+          'preferences'  : _prefs.toJson(),
+          'filters'      : _activeFilters.toList(),
+          'task_history' : taskHistory,
         }),
       ).timeout(const Duration(seconds: 120));
 

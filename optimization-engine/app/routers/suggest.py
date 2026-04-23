@@ -108,15 +108,16 @@ class UserPreferences(BaseModel):
 
 
 class SuggestRequest(BaseModel):
-    city        : str
-    district    : str             = ""
-    category    : str             = "gezinti"
-    subcategory : str             = ""
-    api_key     : str
-    max_results : int             = 8
-    radius_km   : int             = 0
-    preferences : UserPreferences = UserPreferences()
-    filters     : list[str]       = []   # AI filtre listesi
+    city         : str
+    district     : str             = ""
+    category     : str             = "gezinti"
+    subcategory  : str             = ""
+    api_key      : str
+    max_results  : int             = 8
+    radius_km    : int             = 0
+    preferences  : UserPreferences = UserPreferences()
+    filters      : list[str]       = []   # AI filtre listesi
+    task_history : list[dict]      = []   # Kullanıcı geçmişi (kişiselleştirme için)
 
 
 class PlaceItem(BaseModel):
@@ -317,8 +318,26 @@ async def _analyze_filters(place_name: str, reviews: list[str],
     return scores
 
 
+def _personalize_score(category: str, task_history: list[dict]) -> float:
+    """Kullanıcının geçmişinden kategori tercih skoru çıkar (0-1)."""
+    if not task_history:
+        return 0.5
+    cat_counts: dict[str, int] = {}
+    for t in task_history:
+        cat = str(t.get('category', '')).lower().strip()
+        if cat:
+            cat_counts[cat] = cat_counts.get(cat, 0) + 1
+    total = sum(cat_counts.values())
+    if total == 0:
+        return 0.5
+    raw = cat_counts.get(category.lower(), 0) / total
+    # 0.3..1.0 aralığına normalize et (tamamen yoksa 0.3, sık kullanılıyorsa 1.0)
+    return min(0.3 + raw * 0.7, 1.0)
+
+
 def _score(place: dict, prefs: UserPreferences,
-           filter_scores: dict[str, float] | None = None) -> float:
+           filter_scores: dict[str, float] | None = None,
+           personalize_score: float | None = None) -> float:
     base = place.get("rating", 3.0) / 5.0 * 0.5
     price = place.get("price_level", -1)
     if price != -1:
@@ -331,6 +350,9 @@ def _score(place: dict, prefs: UserPreferences,
         base += avg_filter * 0.35
     else:
         base += 0.15
+
+    if personalize_score is not None:
+        base += personalize_score * 0.15
 
     return min(round(base, 2), 1.0)
 
@@ -420,6 +442,12 @@ async def suggest_places(req: SuggestRequest):
         for p, fs in zip(shown, filter_results):
             filter_scores_map[p["place_id"]] = fs if isinstance(fs, dict) else {}
 
+    # Kişiselleştirme skoru (görev geçmişi varsa)
+    p_score = (
+        _personalize_score(cats[0] if len(cats) == 1 else req.category, req.task_history)
+        if req.task_history else None
+    )
+
     items = [
         PlaceItem(
             name        = p["name"],
@@ -433,7 +461,8 @@ async def suggest_places(req: SuggestRequest):
             open_now    = p.get("open_now"),
             ai_reason   = reasons[i] if i < len(reasons) else "",
             match_score = _score(p, req.preferences,
-                                 filter_scores_map.get(p["place_id"])),
+                                 filter_scores_map.get(p["place_id"]),
+                                 personalize_score=p_score),
         )
         for i, p in enumerate(shown)
     ]

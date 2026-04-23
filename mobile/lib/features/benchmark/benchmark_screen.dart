@@ -60,6 +60,11 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
   List<Map<String, dynamic>> _history = [];
   bool _showHistory = false;
 
+  // Gerçek Hayat sekmesi
+  bool          _rwLoading   = false;
+  String?       _rwError;
+  List<dynamic> _rwScenarios = [];
+
   @override
   void initState() {
     super.initState();
@@ -140,6 +145,25 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
     }
   }
 
+  Future<void> _runRealWorld() async {
+    setState(() { _rwLoading = true; _rwError = null; _rwScenarios = []; });
+    try {
+      final response = await http
+          .get(Uri.parse('${ApiConstants.optimizationBaseUrl}/benchmark/real-world'))
+          .timeout(const Duration(seconds: 300));
+      final data = jsonDecode(response.body);
+      if (data['success'] == true) {
+        setState(() => _rwScenarios = data['scenarios'] as List);
+      } else {
+        setState(() => _rwError = data['error'] ?? 'Hata oluştu.');
+      }
+    } catch (e) {
+      setState(() => _rwError = 'Sunucuya bağlanılamadı: $e');
+    } finally {
+      setState(() => _rwLoading = false);
+    }
+  }
+
   @override
   void dispose() {
     _timer?.cancel();
@@ -155,7 +179,9 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
     final tp     = AppColors.textPrimary(context);
     final ts     = AppColors.textSecond(context);
 
-    return Scaffold(
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
       backgroundColor: bg,
       appBar: AppBar(
         backgroundColor:  surf,
@@ -195,11 +221,26 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
             ),
         ],
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(1),
-          child: Divider(height: 1, color: border),
+          preferredSize: const Size.fromHeight(49),
+          child: Column(children: [
+            Divider(height: 1, color: border),
+            TabBar(
+              indicatorColor:       AppColors.orange,
+              indicatorWeight:      2.5,
+              labelColor:           AppColors.orange,
+              unselectedLabelColor: ts,
+              labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+              tabs: const [
+                Tab(icon: Icon(Icons.science_outlined,     size: 16), text: 'TSP Klasik'),
+                Tab(icon: Icon(Icons.location_city_rounded, size: 16), text: 'Gerçek Hayat'),
+              ],
+            ),
+          ]),
         ),
       ),
-      body: SingleChildScrollView(
+      body: TabBarView(
+        children: [
+          SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -607,6 +648,208 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
           ],
         ),
       ),
+          _buildRealWorldTab(surf, border, tp, ts),
+        ],
+      ),
+    )); // DefaultTabController
+  }
+
+  // ── Gerçek Hayat Sekmesi ────────────────────────────────────────────────────
+  Widget _buildRealWorldTab(Color surf, Color border, Color tp, Color ts) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        // Açıklama kartı
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color:        const Color(0xFF6366F1).withOpacity(0.07),
+            borderRadius: BorderRadius.circular(14),
+            border:       Border.all(color: const Color(0xFF6366F1).withOpacity(0.25)),
+          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Row(children: [
+              Icon(Icons.location_city_rounded, color: Color(0xFF6366F1), size: 18),
+              SizedBox(width: 8),
+              Text('Gerçek Hayat Senaryoları',
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15,
+                      color: Color(0xFF6366F1))),
+            ]),
+            const SizedBox(height: 8),
+            Text(
+              'Samsun ve Amasya koordinatlı gerçek senaryolar: '
+              'Kurye (10 durak), Satış Temsilcisi (7 durak), Sağlık Ziyaretçisi (5 durak). '
+              'Tüm senaryolar 5 algoritmayla çözülür, Gemini sonuçları yorumlar.',
+              style: TextStyle(color: ts, fontSize: 13, height: 1.4),
+            ),
+          ]),
+        ),
+        const SizedBox(height: 14),
+
+        // Başlat butonu
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton.icon(
+            onPressed: _rwLoading ? null : _runRealWorld,
+            icon: _rwLoading
+                ? const SizedBox(width: 18, height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : const Icon(Icons.play_arrow_rounded, size: 20),
+            label: Text(
+              _rwLoading ? 'Senaryolar çalışıyor...' : 'Senaryoları Çalıştır',
+              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _rwLoading ? AppColors.textDim(context) : const Color(0xFF6366F1),
+              foregroundColor: Colors.white,
+              padding:   const EdgeInsets.symmetric(vertical: 14),
+              elevation: 0,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+          ),
+        ),
+
+        if (_rwLoading) ...[
+          const SizedBox(height: 12),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+                minHeight: 4, backgroundColor: border,
+                color: const Color(0xFF6366F1)),
+          ),
+        ],
+
+        if (_rwError != null) ...[
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color:        AppColors.dangerDim,
+              borderRadius: BorderRadius.circular(12),
+              border:       Border.all(color: AppColors.danger.withOpacity(0.5)),
+            ),
+            child: Row(children: [
+              const Icon(Icons.error_outline, color: AppColors.danger),
+              const SizedBox(width: 10),
+              Expanded(child: Text(_rwError!,
+                  style: const TextStyle(color: AppColors.danger, fontSize: 13))),
+            ]),
+          ),
+        ],
+
+        if (_rwScenarios.isNotEmpty) ...[
+          const SizedBox(height: 20),
+          ..._rwScenarios.map((sc) => _buildScenarioCard(sc, surf, border, tp, ts)),
+        ],
+        const SizedBox(height: 24),
+      ]),
+    );
+  }
+
+  Widget _buildScenarioCard(dynamic sc, Color surf, Color border, Color tp, Color ts) {
+    final label       = sc['label']              as String;
+    final city        = sc['city']               as String;
+    final nStops      = sc['n_stops']            as int;
+    final winner      = sc['winner']             as String;
+    final winnerDist  = (sc['winner_distance_km'] as num).toDouble();
+    final aiInterp    = sc['ai_interpretation']  as String? ?? '';
+    final results     = (sc['results']           as List).cast<Map<String, dynamic>>();
+
+    return Container(
+      margin:  const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color:        surf,
+        borderRadius: BorderRadius.circular(14),
+        border:       Border.all(color: border),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        // Başlık
+        Row(children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color:        const Color(0xFF6366F1).withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(city, style: const TextStyle(
+                color: Color(0xFF6366F1), fontSize: 12, fontWeight: FontWeight.w700)),
+          ),
+          const SizedBox(width: 8),
+          Expanded(child: Text(label,
+              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: tp))),
+          Text('$nStops durak', style: TextStyle(color: ts, fontSize: 12)),
+        ]),
+        const SizedBox(height: 10),
+
+        // Kazanan chip
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color:        AppColors.success.withOpacity(0.07),
+            borderRadius: BorderRadius.circular(10),
+            border:       Border.all(color: AppColors.success.withOpacity(0.3)),
+          ),
+          child: Row(children: [
+            const Icon(Icons.emoji_events_rounded, color: AppColors.success, size: 16),
+            const SizedBox(width: 8),
+            Text('${_algoLabel(winner)}  ·  ${winnerDist.toStringAsFixed(2)} km',
+                style: const TextStyle(color: AppColors.success,
+                    fontWeight: FontWeight.w700, fontSize: 13)),
+          ]),
+        ),
+        const SizedBox(height: 10),
+
+        // Algoritma sonuçları
+        ...results.map((r) {
+          final algo  = r['algorithm']          as String;
+          final dist  = (r['total_distance_km'] as num).toDouble();
+          final ms    = (r['execution_time_ms'] as num).toDouble();
+          final isWin = algo == winner;
+          final color = algoColor(algo);
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Row(children: [
+              Container(
+                width: 8, height: 8,
+                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 8),
+              Expanded(child: Text(_algoLabel(algo),
+                  style: TextStyle(fontSize: 12,
+                      color: isWin ? AppColors.success : tp,
+                      fontWeight: isWin ? FontWeight.w700 : FontWeight.w400))),
+              Text('${dist.toStringAsFixed(2)} km  ·  ${ms.toStringAsFixed(1)} ms',
+                  style: TextStyle(fontSize: 11, color: isWin ? AppColors.success : ts)),
+            ]),
+          );
+        }),
+
+        // AI yorumu
+        if (aiInterp.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  const Color(0xFF6366F1).withOpacity(0.07),
+                  const Color(0xFF8B5CF6).withOpacity(0.04),
+                ],
+              ),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                  color: const Color(0xFF6366F1).withOpacity(0.2)),
+            ),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Icon(Icons.auto_awesome, color: Color(0xFF6366F1), size: 14),
+              const SizedBox(width: 8),
+              Expanded(child: Text(aiInterp,
+                  style: TextStyle(color: tp, fontSize: 12, height: 1.4))),
+            ]),
+          ),
+        ],
+      ]),
     );
   }
 

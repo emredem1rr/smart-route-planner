@@ -1,3 +1,5 @@
+❯ cat C:\Users\demir\Desktop\prompt.txt | claude
+
 cd C:\Users\demir\Desktop\smart-route-planner\optimization-engine
 venv\Scripts\Activate.ps1
 

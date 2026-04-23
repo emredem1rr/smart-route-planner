@@ -11,6 +11,7 @@ class RouteResult {
   final bool            usedRealRoads;
   final List<List<double>>? routeGeometry;
   final List<double>?   segmentTimes;   // dakika, her segment için  // [[lat,lon], ...]
+  final String?         aiExplanation;  // Gemini rota açıklaması
 
   RouteResult({
     required this.orderedTasks,
@@ -23,6 +24,7 @@ class RouteResult {
     this.usedRealRoads  = false,
     this.routeGeometry,
     this.segmentTimes,
+    this.aiExplanation,
   });
 
   factory RouteResult.fromJson(Map<String, dynamic> j) => RouteResult(
@@ -45,6 +47,7 @@ class RouteResult {
         ? (j['segment_times'] as List)
         .map((v) => (v as num).toDouble()).toList()
         : null,
+    aiExplanation   : j['ai_explanation'] as String?,
   );
 }
 

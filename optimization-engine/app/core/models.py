@@ -54,6 +54,7 @@ class RouteResult(BaseModel):
     used_real_roads:   bool                              = False
     route_geometry:    Optional[list[list[float]]]       = None  # [[lat,lon], ...]
     segment_times:     Optional[list[float]]             = None  # dakika cinsinden her segment
+    ai_explanation:    Optional[str]                     = None  # Gemini rota açıklaması
 
 
 class AlgorithmLog(BaseModel):

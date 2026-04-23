@@ -11,8 +11,37 @@ from ..algorithms.simulated_annealing import run_simulated_annealing
 from ..algorithms.ant_colony          import run_ant_colony
 from ..algorithms.tabu_search         import run_tabu_search
 from ..algorithms.lin_kernighan       import run_lin_kernighan
+from ..ai_provider                    import generate as ai_generate
 
 router = APIRouter()
+
+
+async def _generate_route_explanation(tasks, algorithm: str,
+                                       dist_km: float, time_min: float) -> str:
+    algo_labels = {
+        'genetic':             'Genetik Algoritma',
+        'simulated_annealing': 'Simüle Tavlama',
+        'ant_colony':          'Karınca Kolonisi (ACO)',
+        'tabu_search':         'Tabu Arama',
+        'lin_kernighan':       'Lin-Kernighan',
+    }
+    algo_label = algo_labels.get(algorithm, algorithm)
+    task_seq   = ' → '.join(t.name for t in tasks)
+    prompt = (
+        f"Optimize edilmiş rota: {len(tasks)} görev, "
+        f"{dist_km:.1f} km, {time_min:.0f} dakika, {algo_label} kullanıldı.\n"
+        f"Görev sırası: {task_seq}\n\n"
+        f"Bu rotayı Türkçe, 2-3 cümle, kullanıcı dostu olarak açıkla "
+        f"(neden bu sıra tercih edildi, öne çıkan avantaj nedir?). "
+        f"Sadece açıklama metnini yaz, başlık veya JSON ekleme."
+    )
+    try:
+        result = await asyncio.wait_for(ai_generate(prompt, max_tokens=300), timeout=10.0)
+        if result and not result.startswith('{'):
+            return result.strip()
+    except Exception as e:
+        print(f"[RouteExplain] {e}")
+    return ""
 
 # Gerçek yol için maksimum görev sayısı
 # OSRM table API n×n istek yapar — çok büyük matris yavaşlar
@@ -129,6 +158,11 @@ async def run_comparison(request: OptimizeRequest) -> OptimizeResponse:
         avg_min = (dist_km / 50.0 * 60.0) / max(n_segs, 1)
         seg_times = [round(avg_min, 1)] * n_segs
 
+    ai_explanation = await _generate_route_explanation(
+        ordered_tasks, winner_name,
+        winner['stats']['total_distance'], total_travel_time,
+    )
+
     route_result = RouteResult(
         ordered_tasks     = ordered_tasks,
         total_distance    = winner['stats']['total_distance'],
@@ -140,6 +174,7 @@ async def run_comparison(request: OptimizeRequest) -> OptimizeResponse:
         used_real_roads   = use_real,
         route_geometry    = route_geometry,  # [(lat,lon), ...] veya None
         segment_times     = seg_times,
+        ai_explanation    = ai_explanation or None,
     )
 
     comparison_logs = [
