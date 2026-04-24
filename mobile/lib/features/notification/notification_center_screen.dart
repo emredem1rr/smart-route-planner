@@ -50,6 +50,7 @@ class _NotificationCenterScreenState extends State<NotificationCenterScreen> {
         backgroundColor:  surf,
         elevation:        0,
         surfaceTintColor: Colors.transparent,
+        toolbarHeight:    64,
         title: Text('Bildirim Merkezi',
             style: TextStyle(color: tp, fontSize: 17, fontWeight: FontWeight.w700)),
         actions: [

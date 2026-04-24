@@ -133,16 +133,18 @@ class _SuggestScreenState extends State<SuggestScreen> with AutomaticKeepAliveCl
   bool _useTraffic = false;
 
   // Her kategori için ayrı state
-  final Map<String, List<PlaceItem>> _catPlaces  = {};
-  final Map<String, String>          _catSummary = {};
-  final Map<String, bool>            _catLoading = {};
-  final Map<String, String?>         _catError   = {};
+  final Map<String, List<PlaceItem>> _catPlaces    = {};
+  final Map<String, String>          _catSummary   = {};
+  final Map<String, bool>            _catLoading   = {};
+  final Map<String, String?>         _catError     = {};
+  final Map<String, bool>            _catSearched  = {};
 
   // Aktif kategorinin state'i
-  List<PlaceItem> get _places  => _catPlaces[_category]  ?? [];
-  String          get _summary => _catSummary[_category] ?? '';
-  bool            get _loading => _catLoading[_category] ?? false;
-  String?         get _error   => _catError[_category];
+  List<PlaceItem> get _places     => _catPlaces[_category]   ?? [];
+  String          get _summary    => _catSummary[_category]  ?? '';
+  bool            get _loading    => _catLoading[_category]  ?? false;
+  String?         get _error      => _catError[_category];
+  bool            get _hasSearched => _catSearched[_category] ?? false;
 
   // Cache — şehir|kategori|subcat|radius → sonuçlar (persistent)
   final Map<String, List<PlaceItem>> _memCache   = {};
@@ -288,9 +290,10 @@ class _SuggestScreenState extends State<SuggestScreen> with AutomaticKeepAliveCl
     // Cache'de bu şehir+kategori varsa anında göster
     if (_memCache.containsKey(cacheKey)) {
       setState(() {
-        _catPlaces[_category]  = List.from(_memCache[cacheKey]!);
-        _catSummary[_category] = _memSummary[cacheKey] ?? '';
-        _catError[_category]   = null;
+        _catPlaces[_category]   = List.from(_memCache[cacheKey]!);
+        _catSummary[_category]  = _memSummary[cacheKey] ?? '';
+        _catError[_category]    = null;
+        _catSearched[_category] = true;
       });
       // Arka planda tazele + diğer kategorileri prefetch et
       _fetchAndCache(city, _category, _subcategory, _radiusKm, cacheKey, background: true);
@@ -364,19 +367,26 @@ class _SuggestScreenState extends State<SuggestScreen> with AutomaticKeepAliveCl
         // Kategori state'ini güncelle
         if (mounted) {
           setState(() {
-            _catPlaces[category]  = places;
-            _catSummary[category] = summary;
-            _catError[category]   = null;
+            _catPlaces[category]   = places;
+            _catSummary[category]  = summary;
+            _catError[category]    = null;
+            if (!background) _catSearched[category] = true;
           });
         }
       } else {
         if (!background && mounted) {
-          setState(() => _catError[category] = data['error'] ?? 'Hata oluştu.');
+          setState(() {
+            _catError[category]    = data['error'] ?? 'Hata oluştu.';
+            _catSearched[category] = true;
+          });
         }
       }
     } catch (e) {
       if (!background && mounted) {
-        setState(() => _catError[category] = 'Bağlantı hatası: $e');
+        setState(() {
+          _catError[category]    = 'Bağlantı hatası: $e';
+          _catSearched[category] = true;
+        });
       }
     } finally {
       if (!background && mounted) setState(() => _catLoading[category] = false);
@@ -608,6 +618,7 @@ class _SuggestScreenState extends State<SuggestScreen> with AutomaticKeepAliveCl
 
     return Scaffold(
       backgroundColor: bg,
+      resizeToAvoidBottomInset: false,
       floatingActionButton: FloatingActionButton(
         onPressed: () => _showCategoryPicker(context),
         backgroundColor: const Color(0xFF6366F1),
@@ -616,16 +627,20 @@ class _SuggestScreenState extends State<SuggestScreen> with AutomaticKeepAliveCl
       appBar: AppBar(
         backgroundColor:  surf,
         elevation:        0,
+        toolbarHeight:    64,
         surfaceTintColor: Colors.transparent,
         leading: GestureDetector(
           onTap: () => Navigator.pop(context),
-          child: Container(
-            margin: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-                color: AppColors.surfaceHigh(context),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: border)),
-            child: Icon(Icons.arrow_back_rounded, color: tp, size: 18),
+          child: Padding(
+            padding: const EdgeInsets.only(left: 8),
+            child: Container(
+              width: 38, height: 38,
+              decoration: BoxDecoration(
+                  color: AppColors.surfaceHigh(context),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: border)),
+              child: Icon(Icons.arrow_back_rounded, color: tp, size: 18),
+            ),
           ),
         ),
         title: Row(children: [
@@ -1198,12 +1213,35 @@ class _SuggestScreenState extends State<SuggestScreen> with AutomaticKeepAliveCl
     }
 
     if (_places.isEmpty) {
-      // Boş durum — kategori seçilmiş, arama bekleniyor
       final cat = _categories.firstWhere((c) => c['key'] == _category);
+      if (_hasSearched) {
+        // Arama yapıldı ama sonuç gelmedi
+        return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: const BoxDecoration(color: Color(0xFFF1F5F9), shape: BoxShape.circle),
+            child: const Icon(Icons.search_off_rounded, size: 36, color: Color(0xFF94A3B8)),
+          ),
+          const SizedBox(height: 14),
+          Text('Sonuç bulunamadı',
+              style: TextStyle(color: tp, fontWeight: FontWeight.w600, fontSize: 15)),
+          const SizedBox(height: 6),
+          Text('Farklı şehir, kategori veya filtre dene',
+              style: TextStyle(color: ts, fontSize: 13)),
+          const SizedBox(height: 16),
+          TextButton.icon(
+            onPressed: _search,
+            icon: const Icon(Icons.refresh_rounded, size: 16),
+            label: const Text('Tekrar Ara'),
+            style: TextButton.styleFrom(foregroundColor: const Color(0xFF6366F1)),
+          ),
+        ]));
+      }
+      // İlk açılış — arama henüz yapılmadı
       return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
         Container(
           padding: const EdgeInsets.all(20),
-          decoration: const BoxDecoration(color: const Color(0xFFEEF2FF), shape: BoxShape.circle),
+          decoration: const BoxDecoration(color: Color(0xFFEEF2FF), shape: BoxShape.circle),
           child: Icon(cat['icon'] as IconData, size: 36, color: const Color(0xFF6366F1)),
         ),
         const SizedBox(height: 14),
@@ -1746,10 +1784,11 @@ class _CategorySearchPageState extends State<_CategorySearchPage> {
   List<String>    _cityHistory = [];
   String          _subcategory = '';
   int             _radiusKm   = 0;
-  bool            _loading    = false;
+  bool            _loading     = false;
+  bool            _hasSearched = false;
   String?         _error;
-  String          _summary    = '';
-  List<PlaceItem> _places     = [];
+  String          _summary     = '';
+  List<PlaceItem> _places      = [];
   late UserPreferences _prefs;
 
   static const _catLabels = {
@@ -1852,14 +1891,15 @@ class _CategorySearchPageState extends State<_CategorySearchPage> {
       final data = jsonDecode(resp.body);
       if (data['success'] == true) {
         setState(() {
-          _summary = data['summary'] ?? '';
-          _places  = (data['places'] as List).map((p) => PlaceItem.fromJson(p)).toList();
+          _summary     = data['summary'] ?? '';
+          _places      = (data['places'] as List).map((p) => PlaceItem.fromJson(p)).toList();
+          _hasSearched = true;
         });
       } else {
-        setState(() => _error = data['error'] ?? 'Hata oluştu.');
+        setState(() { _error = data['error'] ?? 'Hata oluştu.'; _hasSearched = true; });
       }
     } catch (e) {
-      setState(() => _error = 'Bağlantı hatası: $e');
+      setState(() { _error = 'Bağlantı hatası: $e'; _hasSearched = true; });
     } finally {
       setState(() => _loading = false);
     }
@@ -1881,6 +1921,7 @@ class _CategorySearchPageState extends State<_CategorySearchPage> {
         backgroundColor:  surf,
         elevation:        0,
         surfaceTintColor: Colors.transparent,
+        toolbarHeight:    64,
         title: Text(catLabel,
             style: TextStyle(color: tp, fontSize: 17, fontWeight: FontWeight.w600)),
         bottom: PreferredSize(
@@ -2034,9 +2075,19 @@ class _CategorySearchPageState extends State<_CategorySearchPage> {
               ])))
               : _places.isEmpty && !_loading
               ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Icon(Icons.search, size: 48, color: ts),
+            Icon(
+              _hasSearched ? Icons.search_off_rounded : Icons.search,
+              size: 48, color: ts,
+            ),
             const SizedBox(height: 12),
-            Text('Şehir gir ve ara', style: TextStyle(color: ts)),
+            Text(
+              _hasSearched ? 'Sonuç bulunamadı' : 'Şehir gir ve ara',
+              style: TextStyle(color: ts),
+            ),
+            if (_hasSearched) ...[
+              const SizedBox(height: 8),
+              Text('Farklı şehir veya filtre dene', style: TextStyle(color: ts, fontSize: 12)),
+            ],
           ]))
               : ListView.builder(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 80),

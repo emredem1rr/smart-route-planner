@@ -82,9 +82,20 @@ class _RegisterScreenState extends State<RegisterScreen> {
         backgroundColor:  surf,
         elevation:        0,
         surfaceTintColor: Colors.transparent,
-        leading: IconButton(
-          icon:      Icon(Icons.arrow_back, color: tp),
-          onPressed: () => Navigator.pop(context),
+        toolbarHeight:    64,
+        leading: Padding(
+          padding: const EdgeInsets.only(left: 8),
+          child: GestureDetector(
+            onTap: () => Navigator.pop(context),
+            child: Container(
+              width: 38, height: 38,
+              decoration: BoxDecoration(
+                  color: AppColors.surfaceHigh(context),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: border)),
+              child: Icon(Icons.arrow_back_rounded, color: tp, size: 18),
+            ),
+          ),
         ),
         title: Text(
           t('register'),

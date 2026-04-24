@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -18,6 +19,7 @@ import '../route/route_history_screen.dart';
 import 'bulk_add_screen.dart';
 import 'past_tasks_screen.dart';
 import '../notifications/notification_center_screen.dart';
+import '../../core/models/route_result_model.dart';
 import '../../core/providers/settings_provider.dart';
 import '../route/route_result_screen.dart';
 import '../auth/login_screen.dart';
@@ -78,8 +80,7 @@ class TaskListScreen extends StatefulWidget {
   State<TaskListScreen> createState() => _TaskListScreenState();
 }
 
-class _TaskListScreenState extends State<TaskListScreen>
-    with SingleTickerProviderStateMixin {
+class _TaskListScreenState extends State<TaskListScreen> {
 
   final _tasks        = <TaskModel>[];
   final _overdueTasks = <TaskModel>[];
@@ -100,8 +101,10 @@ class _TaskListScreenState extends State<TaskListScreen>
   bool   _online    = true;
   String _userName  = '';
 
-  late final AnimationController _pulse;
-  late final Animation<double>   _pulseAnim;
+  // Rota cache
+  OptimizeResponse? _cachedResult;
+  String _cachedHash = '';
+
   Position? _lastPos;
   static const _reroute = 100.0;
 
@@ -125,10 +128,6 @@ class _TaskListScreenState extends State<TaskListScreen>
   @override
   void initState() {
     super.initState();
-    _pulse = AnimationController(vsync: this, duration: const Duration(seconds: 2))
-      ..repeat(reverse: true);
-    _pulseAnim = Tween(begin: 0.9, end: 1.0).animate(
-        CurvedAnimation(parent: _pulse, curve: Curves.easeInOut));
     _storage.getUserName().then((n) => setState(() => _userName = n ?? ''));
     _loadTasks();
     Connectivity().checkConnectivity().then((r) =>
@@ -141,7 +140,7 @@ class _TaskListScreenState extends State<TaskListScreen>
   }
 
   @override
-  void dispose() { _pulse.dispose(); _searchCtrl.dispose(); super.dispose(); }
+  void dispose() { _searchCtrl.dispose(); super.dispose(); }
 
   Future<void> _loadTasks() async {
     setState(() => _loading = true);
@@ -175,6 +174,39 @@ class _TaskListScreenState extends State<TaskListScreen>
     });
     WidgetService.updateWidget(_tasks);
     _geo.start(_tasks);
+    _checkRouteCache();
+  }
+
+  String _taskHash(List<TaskModel> tasks) {
+    final ids = tasks.map((t) => '${t.id}:${t.name}').toList()..sort();
+    return ids.join(',');
+  }
+
+  Future<void> _checkRouteCache() async {
+    final hash       = _taskHash(_tasks);
+    final cachedJson = await _storage.getString('route_cache_json');
+    final cachedHash = await _storage.getString('route_cache_hash');
+    if (cachedJson != null && cachedJson.isNotEmpty && cachedHash == hash) {
+      try {
+        final data = jsonDecode(cachedJson) as Map<String, dynamic>;
+        if (mounted) setState(() { _cachedResult = OptimizeResponse.fromJson(data); _cachedHash = hash; });
+        return;
+      } catch (_) {}
+    }
+    if (mounted) setState(() { _cachedResult = null; _cachedHash = ''; });
+  }
+
+  Future<void> _saveRouteCache(OptimizeResponse r) async {
+    final hash = _taskHash(_tasks);
+    await _storage.setString('route_cache_json', jsonEncode(r.toJson()));
+    await _storage.setString('route_cache_hash', hash);
+    setState(() { _cachedResult = r; _cachedHash = hash; });
+  }
+
+  Future<void> _clearRouteCache() async {
+    await _storage.setString('route_cache_json', '');
+    await _storage.setString('route_cache_hash', '');
+    if (mounted) setState(() { _cachedResult = null; _cachedHash = ''; });
   }
 
   List<TaskModel> get _filtered {
@@ -233,12 +265,30 @@ class _TaskListScreenState extends State<TaskListScreen>
     if (_tasks.isEmpty) { _snack('Bugün görev yok', _K.danger); return; }
     setState(() => _opt = true);
     _lastPos = _pos;
-    final r = _online ? await _api.optimize(_req(_pos!)) : _localOpt.optimize(_req(_pos!));
-    setState(() => _opt = false);
-    if (!mounted) return;
-    if (r.success && r.result != null) {
-      Navigator.push(context, MaterialPageRoute(builder: (_) => RouteResultScreen(response: r)));
-    } else { _snack(r.error ?? 'Hata', _K.danger); }
+    try {
+      final r = _online ? await _api.optimize(_req(_pos!)) : _localOpt.optimize(_req(_pos!));
+      setState(() => _opt = false);
+      if (!mounted) return;
+      if (r.success && r.result != null) {
+        await _saveRouteCache(r);
+        Navigator.push(context, MaterialPageRoute(builder: (_) => RouteResultScreen(response: r)));
+      } else {
+        _snack(r.error ?? 'Optimizasyon başarısız oldu.', _K.danger);
+      }
+    } catch (e) {
+      setState(() => _opt = false);
+      final msg = e.toString().contains('SocketException') || e.toString().contains('Failed host lookup')
+          ? 'Sunucuya bağlanılamadı. İnternet bağlantınızı kontrol edin.'
+          : e.toString().contains('TimeoutException') || e.toString().contains('timed out')
+          ? 'Bağlantı zaman aşımına uğradı. Tekrar deneyin.'
+          : 'Optimizasyon hatası. Tekrar deneyin.';
+      if (mounted) _snack(msg, _K.danger);
+    }
+  }
+
+  void _showCachedRoute() {
+    if (_cachedResult == null) return;
+    Navigator.push(context, MaterialPageRoute(builder: (_) => RouteResultScreen(response: _cachedResult!)));
   }
 
   Future<void> _addTask() async {
@@ -247,6 +297,7 @@ class _TaskListScreenState extends State<TaskListScreen>
     if (t != null) {
       if (await _sync.saveTask(t)) {
         await NotificationService().scheduleTaskNotification(t);
+        _clearRouteCache();
         _loadTasks();
       } else { _snack('Görev kaydedilemedi', _K.danger); }
     }
@@ -320,6 +371,7 @@ class _TaskListScreenState extends State<TaskListScreen>
     }
     await _sync.deleteTask(task.id, deleteAll: all);
     await NotificationService().cancelTaskNotification(task.id);
+    _clearRouteCache();
     setState(() {
       _tasks.removeWhere((t) => t.id == task.id);
       _overdueTasks.removeWhere((t) => t.id == task.id);
@@ -348,6 +400,7 @@ class _TaskListScreenState extends State<TaskListScreen>
       backgroundColor: _K.bg(dark),
       body: Column(children: [
         _safeTop(dark),
+        _offlineBanner(dark),
         Expanded(child: CustomScrollView(slivers: [
           SliverToBoxAdapter(child: _header(dark)),
           SliverToBoxAdapter(child: _statsBar(dark)),
@@ -396,6 +449,29 @@ class _TaskListScreenState extends State<TaskListScreen>
   Widget _safeTop(bool dark) => Container(
     color: _K.bg(dark),
     height: MediaQuery.of(context).padding.top,
+  );
+
+  // ── Çevrimdışı banner ────────────────────────────────────────────
+  Widget _offlineBanner(bool dark) => AnimatedSize(
+    duration: const Duration(milliseconds: 250),
+    curve: Curves.easeInOut,
+    child: _online ? const SizedBox.shrink() : Container(
+      width: double.infinity,
+      color: const Color(0xFFFEF3C7),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: const Row(children: [
+        Icon(Icons.wifi_off_rounded, size: 14, color: Color(0xFFB45309)),
+        SizedBox(width: 8),
+        Expanded(child: Text(
+          'Çevrimdışı mod — yerel algoritma kullanılıyor',
+          style: TextStyle(
+            color: Color(0xFFB45309),
+            fontSize: 12,
+            fontWeight: FontWeight.w500,
+          ),
+        )),
+      ]),
+    ),
   );
 
   // ── Header ──────────────────────────────────────────────────────
@@ -547,58 +623,54 @@ class _TaskListScreenState extends State<TaskListScreen>
   // ── Konum kartı ──────────────────────────────────────────────────
   Widget _locCard(bool dark) {
     final has = _pos != null;
-    return AnimatedBuilder(
-      animation: _pulseAnim,
-      builder: (_, ch) => Transform.scale(scale: has ? _pulseAnim.value : 1.0, child: ch),
-      child: Container(
-        margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: _K.surf(dark),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-              color: has ? _K.indigo.withOpacity(0.5) : _K.border(dark),
-              width: has ? 1.5 : 1),
-        ),
-        child: Row(children: [
-          Container(
-            width: 36, height: 36,
-            decoration: BoxDecoration(
-              color: has ? _K.indigoSoft(dark) : _K.surf2(dark),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(has ? Icons.my_location_rounded : Icons.location_off_rounded,
-                color: has ? _K.indigo : _K.text3(dark), size: 17),
-          ),
-          const SizedBox(width: 10),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Başlangıç Konumu',
-                style: TextStyle(color: _K.text2(dark), fontSize: 10, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 2),
-            Text(
-              has ? '${_pos!.latitude.toStringAsFixed(4)}, ${_pos!.longitude.toStringAsFixed(4)}'
-                  : 'Konum alınmadı',
-              style: TextStyle(color: _K.text(dark), fontSize: 12, fontWeight: FontWeight.w600),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ])),
-          _locLoad
-              ? const SizedBox(width: 20, height: 20,
-              child: CircularProgressIndicator(strokeWidth: 2, color: _K.indigo))
-              : GestureDetector(
-            onTap: _getLoc,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: _K.indigoSoft(dark),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(has ? 'Güncelle' : 'Konum Al',
-                  style: const TextStyle(color: _K.indigo, fontSize: 11, fontWeight: FontWeight.w600)),
-            ),
-          ),
-        ]),
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: _K.surf(dark),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+            color: has ? _K.indigo.withOpacity(0.5) : _K.border(dark),
+            width: has ? 1.5 : 1),
       ),
+      child: Row(children: [
+        Container(
+          width: 36, height: 36,
+          decoration: BoxDecoration(
+            color: has ? _K.indigoSoft(dark) : _K.surf2(dark),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(has ? Icons.my_location_rounded : Icons.location_off_rounded,
+              color: has ? _K.indigo : _K.text3(dark), size: 17),
+        ),
+        const SizedBox(width: 10),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Başlangıç Konumu',
+              style: TextStyle(color: _K.text2(dark), fontSize: 10, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 2),
+          Text(
+            has ? '${_pos!.latitude.toStringAsFixed(4)}, ${_pos!.longitude.toStringAsFixed(4)}'
+                : 'Konum alınmadı',
+            style: TextStyle(color: _K.text(dark), fontSize: 12, fontWeight: FontWeight.w600),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ])),
+        _locLoad
+            ? const SizedBox(width: 20, height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2, color: _K.indigo))
+            : GestureDetector(
+          onTap: _getLoc,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: _K.indigoSoft(dark),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(has ? 'Güncelle' : 'Konum Al',
+                style: const TextStyle(color: _K.indigo, fontSize: 11, fontWeight: FontWeight.w600)),
+          ),
+        ),
+      ]),
     );
   }
 
@@ -896,45 +968,71 @@ class _TaskListScreenState extends State<TaskListScreen>
 
   // ── Optimize bar ──────────────────────────────────────────────────
   Widget _optimizeBar(bool dark) {
-    final ready = !_opt && _tasks.isNotEmpty && _pos != null;
+    final ready     = !_opt && _tasks.isNotEmpty && _pos != null;
+    final hasCached = _cachedResult != null;
     return Container(
       color: _K.bg(dark),
       padding: const EdgeInsets.fromLTRB(16, 8, 90, 12),
-      child: GestureDetector(
-        onTap: _opt ? null : _optimize,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 300),
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          decoration: BoxDecoration(
-            gradient: ready ? const LinearGradient(
-                colors: [_K.indigo, _K.violet],
-                begin: Alignment.topLeft, end: Alignment.bottomRight) : null,
-            color: ready ? null : _K.surf2(dark),
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            if (_opt)
-              const SizedBox(width: 18, height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-            else
-              Icon(_online ? Icons.route_rounded : Icons.wifi_off_rounded,
-                  color: ready ? Colors.white : _K.text3(dark), size: 18),
-            const SizedBox(width: 8),
-            Text(
-              _opt ? 'Optimize ediliyor...' : 'Rotayı Optimize Et  (${_tasks.length})',
-              style: TextStyle(
-                  color: ready ? Colors.white : _K.text3(dark),
-                  fontWeight: FontWeight.w700, fontSize: 14),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        // Cache geçerli banner
+        if (hasCached) ...[
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            margin: const EdgeInsets.only(bottom: 6),
+            decoration: BoxDecoration(
+              color: _K.successSoft(dark),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: _K.success.withOpacity(0.35)),
             ),
-          ]),
+            child: Row(children: [
+              const Icon(Icons.check_circle_outline_rounded, color: _K.success, size: 14),
+              const SizedBox(width: 6),
+              const Expanded(child: Text(
+                'Önceki rota geçerli — tekrar optimize etmene gerek yok.',
+                style: TextStyle(color: _K.success, fontSize: 11, fontWeight: FontWeight.w600),
+              )),
+            ]),
+          ),
+        ],
+        GestureDetector(
+          onTap: _opt ? null : (hasCached ? _showCachedRoute : _optimize),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 300),
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            decoration: BoxDecoration(
+              gradient: ready ? const LinearGradient(
+                  colors: [_K.indigo, _K.violet],
+                  begin: Alignment.topLeft, end: Alignment.bottomRight) : null,
+              color: ready ? null : _K.surf2(dark),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              if (_opt)
+                const SizedBox(width: 18, height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              else
+                Icon(hasCached ? Icons.map_rounded : (_online ? Icons.route_rounded : Icons.wifi_off_rounded),
+                    color: ready ? Colors.white : _K.text3(dark), size: 18),
+              const SizedBox(width: 8),
+              Text(
+                _opt       ? 'Optimize ediliyor...'
+                : hasCached ? 'Rotayı Göster  (${_tasks.length})'
+                : 'Rotayı Optimize Et  (${_tasks.length})',
+                style: TextStyle(
+                    color: ready ? Colors.white : _K.text3(dark),
+                    fontWeight: FontWeight.w700, fontSize: 14),
+              ),
+            ]),
+          ),
         ),
-      ),
+      ]),
     );
   }
 
   // ── Bottom nav ────────────────────────────────────────────────────
   Widget _navBar(bool dark) => Container(
-    height: 60 + MediaQuery.of(context).padding.bottom,
+    height: 64 + MediaQuery.of(context).padding.bottom,
     decoration: BoxDecoration(
       color: _K.surf(dark),
       border: Border(top: BorderSide(color: _K.border(dark))),

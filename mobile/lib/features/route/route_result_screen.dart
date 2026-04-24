@@ -1,12 +1,11 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:flutter/services.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -134,16 +133,20 @@ class _RouteResultScreenState extends State<RouteResultScreen>
       appBar: AppBar(
         backgroundColor:  surf,
         elevation:        0,
+        toolbarHeight:    64,
         surfaceTintColor: Colors.transparent,
         leading: GestureDetector(
           onTap: () => Navigator.pop(context),
-          child: Container(
-            margin: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-                color: AppColors.surfaceHigh(context),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: border)),
-            child: Icon(Icons.arrow_back_rounded, color: tp, size: 18),
+          child: Padding(
+            padding: const EdgeInsets.only(left: 8),
+            child: Container(
+              width: 38, height: 38,
+              decoration: BoxDecoration(
+                  color: AppColors.surfaceHigh(context),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: border)),
+              child: Icon(Icons.arrow_back_rounded, color: tp, size: 18),
+            ),
           ),
         ),
         title: Row(children: [
@@ -1143,28 +1146,46 @@ class _RouteResultScreenState extends State<RouteResultScreen>
     final tasks = _orderedTasks;
     final dest  = tasks.last;
 
-    final String url;
-    if (tasks.length == 1) {
-      url = 'https://www.google.com/maps/dir/?api=1'
-          '&destination=${dest.latitude},${dest.longitude}'
-          '&travelmode=driving';
-    } else {
-      final waypoints = tasks
-          .sublist(0, tasks.length - 1)
-          .map((t) => '${t.latitude},${t.longitude}')
-          .join('%7C');
-      url = 'https://www.google.com/maps/dir/?api=1'
-          '&destination=${dest.latitude},${dest.longitude}'
-          '&waypoints=$waypoints'
-          '&travelmode=driving';
+    final waypointStr = tasks.length > 1
+        ? tasks.sublist(0, tasks.length - 1)
+            .map((t) => '${t.latitude},${t.longitude}')
+            .join('%7C')
+        : '';
+
+    // Web URL (Android + iOS fallback)
+    final webUrl = tasks.length == 1
+        ? 'https://www.google.com/maps/dir/?api=1'
+            '&destination=${dest.latitude},${dest.longitude}'
+            '&travelmode=driving'
+        : 'https://www.google.com/maps/dir/?api=1'
+            '&destination=${dest.latitude},${dest.longitude}'
+            '&waypoints=$waypointStr'
+            '&travelmode=driving';
+
+    // iOS: comgooglemaps:// → maps.apple.com → web fallback
+    if (Platform.isIOS) {
+      final iosUrl = tasks.length == 1
+          ? 'comgooglemaps://?daddr=${dest.latitude},${dest.longitude}&directionsmode=driving'
+          : 'comgooglemaps://?daddr=${dest.latitude},${dest.longitude}'
+              '&waypoints=$waypointStr&directionsmode=driving';
+      if (await canLaunchUrl(Uri.parse(iosUrl))) {
+        await launchUrl(Uri.parse(iosUrl));
+        return;
+      }
+      final appleUrl = 'https://maps.apple.com/?daddr=${dest.latitude},${dest.longitude}&dirflg=d';
+      if (await canLaunchUrl(Uri.parse(appleUrl))) {
+        await launchUrl(Uri.parse(appleUrl), mode: LaunchMode.externalApplication);
+        return;
+      }
     }
 
-    final uri = Uri.parse(url);
+    // Android / iOS web fallback
+    final uri = Uri.parse(webUrl);
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     } else if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content:         const Text('Google Maps açılamadı.'),
+        content:         const Text('Harita uygulaması açılamadı.'),
         backgroundColor: AppColors.danger,
         behavior:        SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),

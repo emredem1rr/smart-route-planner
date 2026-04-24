@@ -49,6 +49,20 @@ class RouteResult {
         : null,
     aiExplanation   : j['ai_explanation'] as String?,
   );
+
+  Map<String, dynamic> toJson() => {
+    'ordered_tasks'    : orderedTasks.map((t) => t.toJson()).toList(),
+    'total_distance'   : totalDistance,
+    'total_travel_time': totalTravelTime,
+    'fitness_score'    : fitnessScore,
+    'algorithm_used'   : algorithmUsed,
+    'heuristic_used'   : heuristicUsed,
+    'execution_time_ms': executionTimeMs,
+    'used_real_roads'  : usedRealRoads,
+    'route_geometry'   : routeGeometry,
+    'segment_times'    : segmentTimes,
+    'ai_explanation'   : aiExplanation,
+  };
 }
 
 class AlgorithmLog {
@@ -86,6 +100,14 @@ class AlgorithmLog {
         .map((v) => (v as num).toDouble())
         .toList(),
   );
+
+  Map<String, dynamic> toJson() => {
+    'algorithm'       : algorithm,
+    'fitness_score'   : fitnessScore,
+    'total_distance'  : totalDistance,
+    'execution_time_ms': executionTimeMs,
+    'fitness_history' : fitnessHistory,
+  };
 }
 
 class OptimizeResponse {
@@ -116,4 +138,12 @@ class OptimizeResponse {
         ? Map<String, double>.from(j['start_location'])
         : null,
   );
+
+  Map<String, dynamic> toJson() => {
+    'success'         : success,
+    'result'          : result?.toJson(),
+    'comparison_logs' : comparisonLogs.map((l) => l.toJson()).toList(),
+    'error'           : error,
+    'start_location'  : startLocation,
+  };
 }

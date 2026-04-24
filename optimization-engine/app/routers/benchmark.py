@@ -203,6 +203,23 @@ def _run_benchmark_sync(coords, optimal, dataset_name):
     )
 
 
+class CustomBenchmarkRequest(BaseModel):
+    coordinates : list[list[float]]
+    optimal     : float = -1.0
+    name        : str   = "Özel Dataset"
+
+
+@router.post("/benchmark/custom", response_model=BenchmarkResponse)
+async def benchmark_custom(req: CustomBenchmarkRequest):
+    if len(req.coordinates) < 4:
+        return BenchmarkResponse(success=False, results=[], dataset=req.name, n_cities=0, winner="")
+    coords  = [tuple(c) for c in req.coordinates]
+    optimal = req.optimal if req.optimal > 0 else 0.0
+    return await asyncio.get_event_loop().run_in_executor(
+        None, _run_benchmark_sync, coords, optimal if optimal > 0 else 1.0, req.name
+    )
+
+
 @router.get("/benchmark/berlin52", response_model=BenchmarkResponse)
 async def benchmark_berlin52():
     coords, optimal, name = DATASETS["berlin52"]

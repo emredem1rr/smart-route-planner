@@ -272,9 +272,24 @@ async def _get_reviews(place_id: str, api_key: str) -> list[str]:
         return []
 
 
+# Mekan türüne göre filtre bonusu — Google Places types kullanılarak
+_TYPE_BONUS: dict[str, list[str]] = {
+    "çocuğa uygun"     : ["amusement_park", "zoo", "aquarium", "playground", "park"],
+    "aile dostu"       : ["amusement_park", "park", "restaurant", "zoo"],
+    "açık alan"        : ["park", "natural_feature", "campground", "stadium", "beach"],
+    "sessiz ortam"     : ["library", "museum", "spa", "art_gallery"],
+    "vejetaryen"       : ["restaurant", "cafe", "bakery"],
+    "wifi var"         : ["cafe", "library", "restaurant"],
+    "engelli erişimi"  : [],
+    "evcil hayvan dostu": ["park", "natural_feature", "campground"],
+    "gençler için"     : ["night_club", "amusement_park", "movie_theater", "bowling_alley"],
+}
+
+
 async def _analyze_filters(place_name: str, reviews: list[str],
-                            filters: list[str]) -> dict[str, float]:
-    """Review'ları analiz ederek her filtre için 0-1 uygunluk skoru döndür."""
+                            filters: list[str],
+                            place_types: list[str] = []) -> dict[str, float]:
+    """Review'ları ve mekan türlerini analiz ederek her filtre için 0-1 uygunluk skoru döndür."""
     if not filters:
         return {}
 
@@ -285,13 +300,19 @@ async def _analyze_filters(place_name: str, reviews: list[str],
     for f in filters:
         kws  = FILTER_KEYWORDS.get(f, [])
         if not review_text.strip():
-            scores[f] = 0.5  # review yok → nötr
+            scores[f] = 0.4  # review yok → biraz negatif
             continue
         if kws:
             hits      = sum(1 for kw in kws if kw in review_text)
             scores[f] = min(hits / max(len(kws) * 0.4, 1), 1.0)
         else:
-            scores[f] = 0.5
+            scores[f] = 0.4
+
+    # Mekan türü bonusu — kesin tür eşleşmesi olursa skoru yükselt
+    for f, bonus_types in _TYPE_BONUS.items():
+        if f in scores and bonus_types:
+            if any(pt in place_types for pt in bonus_types):
+                scores[f] = min(scores[f] + 0.3, 1.0)
 
     # AI ile zenginleştir (review varsa)
     if review_text.strip():
@@ -311,7 +332,7 @@ async def _analyze_filters(place_name: str, reviews: list[str],
                 ai_scores = json.loads(m.group()).get("scores", {})
                 for f in filters:
                     if f in ai_scores:
-                        scores[f] = (scores.get(f, 0.5) + float(ai_scores[f])) / 2
+                        scores[f] = (scores.get(f, 0.4) + float(ai_scores[f])) / 2
         except Exception as e:
             print(f"[Filter AI] {e}")
 
@@ -346,8 +367,13 @@ def _score(place: dict, prefs: UserPreferences,
         elif prefs.budget == "luks"   and price >= 3:   base += 0.15
 
     if filter_scores:
-        avg_filter = sum(filter_scores.values()) / len(filter_scores)
-        base += avg_filter * 0.35
+        # AND mantığı: tüm filtreler eşleşmeli (≥0.25); herhangi biri eşleşmezse ceza
+        if all(v >= 0.25 for v in filter_scores.values()):
+            avg_filter = sum(filter_scores.values()) / len(filter_scores)
+            base += avg_filter * 0.35
+        else:
+            # En az bir filtre eşleşmedi — önemli ceza
+            base = max(0.0, base - 0.25)
     else:
         base += 0.15
 
@@ -435,7 +461,8 @@ async def suggest_places(req: SuggestRequest):
         analyze_tasks = [
             _analyze_filters(p["name"],
                              reviews if isinstance(reviews, list) else [],
-                             req.filters)
+                             req.filters,
+                             p.get("types", []))
             for p, reviews in zip(shown, all_reviews)
         ]
         filter_results = await asyncio.gather(*analyze_tasks, return_exceptions=True)

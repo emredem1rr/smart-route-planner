@@ -41,7 +41,12 @@ async def _generate_route_explanation(tasks, algorithm: str,
             return result.strip()
     except Exception as e:
         print(f"[RouteExplain] {e}")
-    return ""
+    # Template fallback — always return a non-empty explanation
+    return (
+        f"{len(tasks)} görev {dist_km:.1f} km mesafe ve yaklaşık "
+        f"{time_min:.0f} dakika seyahat süresiyle optimize edildi. "
+        f"{algo_label} algoritması kullanılarak en verimli rota sırası belirlendi."
+    )
 
 # Gerçek yol için maksimum görev sayısı
 # OSRM table API n×n istek yapar — çok büyük matris yavaşlar

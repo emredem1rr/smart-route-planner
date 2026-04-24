@@ -140,15 +140,19 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
         backgroundColor:  surf,
         elevation:        0,
         surfaceTintColor: Colors.transparent,
-        leading: GestureDetector(
-          onTap: () => Navigator.pop(context),
-          child: Container(
-            margin: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-                color: AppColors.surfaceHigh(context),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: border)),
-            child: Icon(Icons.arrow_back_rounded, color: tp, size: 18),
+        toolbarHeight:    64,
+        leading: Padding(
+          padding: const EdgeInsets.only(left: 8),
+          child: GestureDetector(
+            onTap: () => Navigator.pop(context),
+            child: Container(
+              width: 38, height: 38,
+              decoration: BoxDecoration(
+                  color: AppColors.surfaceHigh(context),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: border)),
+              child: Icon(Icons.arrow_back_rounded, color: tp, size: 18),
+            ),
           ),
         ),
         title: Row(children: [

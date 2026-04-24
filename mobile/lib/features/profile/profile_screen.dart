@@ -240,16 +240,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
       backgroundColor: bg,
       appBar: AppBar(
         backgroundColor: surf, elevation: 0, surfaceTintColor: Colors.transparent,
-
-        leading: GestureDetector(
-          onTap: () => Navigator.pop(context),
-          child: Container(
-            margin: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-                color: AppColors.surfaceHigh(context),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: border)),
-            child: Icon(Icons.arrow_back_rounded, color: tp, size: 18),
+        toolbarHeight: 64,
+        leading: Padding(
+          padding: const EdgeInsets.only(left: 8),
+          child: GestureDetector(
+            onTap: () => Navigator.pop(context),
+            child: Container(
+              width: 38, height: 38,
+              decoration: BoxDecoration(
+                  color: AppColors.surfaceHigh(context),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: border)),
+              child: Icon(Icons.arrow_back_rounded, color: tp, size: 18),
+            ),
           ),
         ),
         title: Row(children: [
@@ -476,8 +479,21 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       backgroundColor: bg,
       appBar: AppBar(
         backgroundColor: surf, elevation: 0, surfaceTintColor: Colors.transparent,
-        leading: IconButton(icon: Icon(Icons.close, color: tp),
-            onPressed: () => Navigator.pop(context)),
+        toolbarHeight: 64,
+        leading: Padding(
+          padding: const EdgeInsets.only(left: 8),
+          child: GestureDetector(
+            onTap: () => Navigator.pop(context),
+            child: Container(
+              width: 38, height: 38,
+              decoration: BoxDecoration(
+                  color: AppColors.surfaceHigh(context),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: border)),
+              child: Icon(Icons.close_rounded, color: tp, size: 18),
+            ),
+          ),
+        ),
         title: Text('Profili Düzenle',
             style: TextStyle(color: tp, fontSize: 17, fontWeight: FontWeight.w600)),
         actions: [
@@ -619,8 +635,21 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
       backgroundColor: bg,
       appBar: AppBar(
         backgroundColor: surf, elevation: 0, surfaceTintColor: Colors.transparent,
-        leading: IconButton(icon: Icon(Icons.arrow_back, color: tp),
-            onPressed: () => Navigator.pop(context)),
+        toolbarHeight: 64,
+        leading: Padding(
+          padding: const EdgeInsets.only(left: 8),
+          child: GestureDetector(
+            onTap: () => Navigator.pop(context),
+            child: Container(
+              width: 38, height: 38,
+              decoration: BoxDecoration(
+                  color: AppColors.surfaceHigh(context),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: border)),
+              child: Icon(Icons.arrow_back_rounded, color: tp, size: 18),
+            ),
+          ),
+        ),
         title: Text('Şifre Değiştir',
             style: TextStyle(color: tp, fontSize: 17, fontWeight: FontWeight.w600)),
         bottom: PreferredSize(preferredSize: const Size.fromHeight(1),
