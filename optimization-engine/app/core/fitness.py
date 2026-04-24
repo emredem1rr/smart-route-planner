@@ -52,6 +52,11 @@ def route_distance(route, dist_matrix) -> float:
 
 
 def calculate_fitness(route, dist_matrix, tasks, config, max_dist: float = None):
+    """
+    cost = toplam_mesafe_km + öncelik_ceza * 0.3 + zaman_penceresi_ihlali * 1000
+    Öncelik: düşük öncelikli görev erken gidilirse ceza artar.
+    Zaman: erken varış → bekleme süresi (soft), geç varış → * 1000 (hard).
+    """
     if not route:
         return float('inf')
 
@@ -59,41 +64,40 @@ def calculate_fitness(route, dist_matrix, tasks, config, max_dist: float = None)
     priority_penalty = 0.0
     time_penalty     = 0.0
 
-    # Mesafe: başlangıç → route[0] → route[1] → ... sıralı
+    # Mesafe: başlangıç → route[0] → route[1] → ... sıralı (km)
     total_distance += dist_matrix[0][route[0]]
     for i in range(len(route) - 1):
         total_distance += dist_matrix[route[i]][route[i + 1]]
 
-    # Öncelik cezası
+    # Öncelik cezası: yüksek öncelikli görev ne kadar erken → ceza düşük
     for pos, task_idx in enumerate(route):
         task = tasks[task_idx - 1]
         priority_penalty += pos * (6 - task.priority)
 
-    # Zaman penceresi cezası — önceki görevden sıralı hesap
+    # Zaman penceresi: erken varış = bekleme maliyeti, geç varış = büyük ceza
     current_time = 0.0
     for i, task_idx in enumerate(route):
         task = tasks[task_idx - 1]
-        # i==0: başlangıçtan ilk göreve, sonraki: önceki görevden
-        prev = 0 if i == 0 else route[i - 1]
+        prev          = 0 if i == 0 else route[i - 1]
         travel        = dist_matrix[prev][task_idx] / 50.0 * 60.0
         current_time += travel
 
         if task.earliest_start > 0 and current_time < task.earliest_start:
-            current_time = float(task.earliest_start)
+            # Bekleme süresi (dakika) → soft maliyet
+            time_penalty += task.earliest_start - current_time
+            current_time  = float(task.earliest_start)
 
         if task.latest_finish < 1440:
             finish_time = current_time + task.duration
             if finish_time > task.latest_finish:
-                time_penalty += (finish_time - task.latest_finish) * 2.0
+                # Zaman penceresi ihlali → büyük ceza
+                time_penalty += (finish_time - task.latest_finish) * 1000.0
 
         current_time += task.duration
 
-    if max_dist is None:
-        max_dist = get_max_dist(dist_matrix)
-
     return round(
-        total_distance   / max(max_dist, 1.0)
+        total_distance
         + priority_penalty * 0.3
-        + time_penalty     * 0.5,
+        + time_penalty,
         6,
     )

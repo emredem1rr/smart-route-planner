@@ -60,7 +60,8 @@ async def run_comparison(request: OptimizeRequest) -> OptimizeResponse:
     if not tasks:
         return OptimizeResponse(success=False, error='Görev listesi boş.')
 
-    use_real = config.use_real_roads and len(tasks) <= REAL_ROADS_MAX_TASKS
+    use_real    = config.use_real_roads and len(tasks) <= REAL_ROADS_MAX_TASKS
+    traffic_used = False
 
     # ── Mesafe matrisi ────────────────────────────────────────
     duration_matrix = None
@@ -72,7 +73,8 @@ async def run_comparison(request: OptimizeRequest) -> OptimizeResponse:
                     build_traffic_matrix_async(request.start_location, tasks),
                     timeout=30.0,
                 )
-                print(f"[Traffic] Trafik matrisi: {len(tasks)+1}×{len(tasks)+1}")
+                traffic_used = True
+                print(f"[Traffic] Trafik modu aktif: Google Distance Matrix kullanılıyor — {len(tasks)+1}×{len(tasks)+1}")
             else:
                 dist_matrix, duration_matrix = await asyncio.wait_for(
                     build_distance_matrix_async(request.start_location, tasks),
@@ -168,18 +170,36 @@ async def run_comparison(request: OptimizeRequest) -> OptimizeResponse:
         winner['stats']['total_distance'], total_travel_time,
     )
 
+    # Manuel mesafe: görev ekleme sırasıyla başlangıç → task[0] → task[1] → ...
+    manual_indices = list(range(1, len(tasks) + 1))
+    manual_dist = dist_matrix[0][manual_indices[0]]
+    for i in range(len(manual_indices) - 1):
+        manual_dist += dist_matrix[manual_indices[i]][manual_indices[i + 1]]
+    manual_dist = round(manual_dist, 4)
+
+    opt_dist    = winner['stats']['total_distance']
+    improvement = round((manual_dist - opt_dist) / manual_dist * 100, 1) if manual_dist > 0 else 0.0
+    km_saved    = round(manual_dist - opt_dist, 2)
+    # Süre farkı (50 km/h varsayım üzerinden)
+    minutes_saved = round(km_saved / 50.0 * 60.0, 1)
+
     route_result = RouteResult(
-        ordered_tasks     = ordered_tasks,
-        total_distance    = winner['stats']['total_distance'],
-        total_travel_time = total_travel_time,
-        fitness_score     = winner['fitness_score'],
-        algorithm_used    = winner_name,
-        heuristic_used    = config.heuristic,
-        execution_time_ms = winner['execution_time_ms'],
-        used_real_roads   = use_real,
-        route_geometry    = route_geometry,  # [(lat,lon), ...] veya None
-        segment_times     = seg_times,
-        ai_explanation    = ai_explanation or None,
+        ordered_tasks       = ordered_tasks,
+        total_distance      = opt_dist,
+        total_travel_time   = total_travel_time,
+        fitness_score       = winner['fitness_score'],
+        algorithm_used      = winner_name,
+        heuristic_used      = config.heuristic,
+        execution_time_ms   = winner['execution_time_ms'],
+        used_real_roads     = use_real,
+        traffic_used        = traffic_used,
+        route_geometry      = route_geometry,
+        segment_times       = seg_times,
+        ai_explanation      = ai_explanation or None,
+        manual_distance     = manual_dist,
+        improvement_percent = improvement,
+        km_saved            = km_saved,
+        minutes_saved       = minutes_saved,
     )
 
     comparison_logs = [

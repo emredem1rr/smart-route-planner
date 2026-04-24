@@ -398,6 +398,22 @@ class AuthService {
     }
   }
 
+  // ── Route history ──────────────────────────────────────────
+  Future<List<Map<String, dynamic>>> getRouteHistory() async {
+    try {
+      final token    = await _storage.getToken();
+      final response = await http.get(
+        Uri.parse('${ApiConstants.baseUrl}/routes/history'),
+        headers: {'Authorization': 'Bearer $token'},
+      ).timeout(const Duration(seconds: 20));
+      final json = jsonDecode(response.body);
+      if (json['success'] == true) {
+        return (json['routes'] as List).cast<Map<String, dynamic>>();
+      }
+    } catch (_) {}
+    return [];
+  }
+
   // ── Logout ─────────────────────────────────────────────────
   Future<void> logout() async {
     await _storage.clearSession();

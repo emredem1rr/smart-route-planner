@@ -29,6 +29,7 @@ import '../benchmark/benchmark_screen.dart';
 import 'add_task_screen.dart';
 import 'edit_task_screen.dart';
 import '../suggest/suggest_screen.dart';
+import '../../core/services/background_task_service.dart';
 
 // ── Tema renkleri ──────────────────────────────────────────────
 class _K {
@@ -137,6 +138,32 @@ class _TaskListScreenState extends State<TaskListScreen> {
       setState(() => _online = on);
       if (on) { SyncService().syncPending(); _loadTasks(); }
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // When this screen becomes the top route again (e.g. pop from another screen),
+    // check if a background optimization completed while we were away.
+    if (ModalRoute.of(context)?.isCurrent != true) return;
+    final bgKey  = 'optimize_${_taskHash(_tasks)}';
+    final pending = BackgroundTaskService().waitFor<OptimizeResponse>(bgKey);
+    if (pending != null && !_opt) {
+      setState(() => _opt = true);
+      pending.then((r) {
+        if (!mounted) return;
+        setState(() => _opt = false);
+        if (r != null && r.success && r.result != null) {
+          BackgroundTaskService().clear(bgKey);
+          _saveRouteCache(r).then((_) {
+            if (mounted && ModalRoute.of(context)?.isCurrent == true) {
+              Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => RouteResultScreen(response: r)));
+            }
+          });
+        }
+      });
+    }
   }
 
   @override
@@ -263,20 +290,44 @@ class _TaskListScreenState extends State<TaskListScreen> {
   Future<void> _optimize() async {
     if (_pos == null)   { _snack('Konum alınmadı', _K.danger); return; }
     if (_tasks.isEmpty) { _snack('Bugün görev yok', _K.danger); return; }
+
+    final bgKey = 'optimize_${_taskHash(_tasks)}';
+
+    // Result already computed in the background — use it immediately
+    if (BackgroundTaskService().hasResult(bgKey)) {
+      final r = BackgroundTaskService().result<OptimizeResponse>(bgKey);
+      BackgroundTaskService().clear(bgKey);
+      if (r != null && r.success && r.result != null) {
+        await _saveRouteCache(r);
+        if (mounted) Navigator.push(context,
+            MaterialPageRoute(builder: (_) => RouteResultScreen(response: r)));
+        return;
+      }
+    }
+
     setState(() => _opt = true);
     _lastPos = _pos;
     try {
-      final r = _online ? await _api.optimize(_req(_pos!)) : _localOpt.optimize(_req(_pos!));
-      setState(() => _opt = false);
+      final r = await BackgroundTaskService().run<OptimizeResponse>(
+        bgKey,
+        () => _online
+            ? _api.optimize(_req(_pos!))
+            : Future.value(_localOpt.optimize(_req(_pos!))),
+      );
+      if (mounted) setState(() => _opt = false);
       if (!mounted) return;
-      if (r.success && r.result != null) {
+      if (r != null && r.success && r.result != null) {
+        BackgroundTaskService().clear(bgKey);
         await _saveRouteCache(r);
-        Navigator.push(context, MaterialPageRoute(builder: (_) => RouteResultScreen(response: r)));
+        if (ModalRoute.of(context)?.isCurrent == true) {
+          Navigator.push(context,
+              MaterialPageRoute(builder: (_) => RouteResultScreen(response: r)));
+        }
       } else {
-        _snack(r.error ?? 'Optimizasyon başarısız oldu.', _K.danger);
+        _snack(r?.error ?? 'Optimizasyon başarısız oldu.', _K.danger);
       }
     } catch (e) {
-      setState(() => _opt = false);
+      if (mounted) setState(() => _opt = false);
       final msg = e.toString().contains('SocketException') || e.toString().contains('Failed host lookup')
           ? 'Sunucuya bağlanılamadı. İnternet bağlantınızı kontrol edin.'
           : e.toString().contains('TimeoutException') || e.toString().contains('timed out')

@@ -28,7 +28,13 @@ class _StatsScreenState extends State<StatsScreen>
   // Genel
   int _totalDone = 0, _totalPending = 0, _totalCancelled = 0;
   double _completionRate = 0;
-  int _streak = 0; // arka arkaya tamamlanan gün
+  int _streak = 0;
+
+  // Rota istatistikleri
+  int    _totalRoutes    = 0;
+  double _totalKmSaved   = 0;
+  String _topAlgo        = '';
+  List<Map<String, dynamic>> _routeHistory = [];
 
   @override
   void initState() {
@@ -48,11 +54,36 @@ class _StatsScreenState extends State<StatsScreen>
       final fromStr = '${from.year}-${from.month.toString().padLeft(2,'0')}-${from.day.toString().padLeft(2,'0')}';
       final toStr   = '${now.year}-${now.month.toString().padLeft(2,'0')}-${now.day.toString().padLeft(2,'0')}';
 
-      final tasks = await _auth.getRemoteTasks(dateFrom: fromStr, dateTo: toStr);
-      _tasks = tasks;
+      final tasks   = await _auth.getRemoteTasks(dateFrom: fromStr, dateTo: toStr);
+      final history = await _auth.getRouteHistory();
+      _tasks        = tasks;
+      _routeHistory = history;
       _compute();
+      _computeRouteStats();
     } catch (_) {}
     setState(() => _loading = false);
+  }
+
+  void _computeRouteStats() {
+    _totalRoutes = _routeHistory.length;
+    if (_routeHistory.isEmpty) return;
+
+    // Toplam km — total_distance alanından
+    double totalKm = 0;
+    for (final r in _routeHistory) {
+      totalKm += (r['total_distance'] as num? ?? 0).toDouble();
+    }
+    _totalKmSaved = double.parse(totalKm.toStringAsFixed(1));
+
+    // En çok kullanılan algoritma
+    final algoCounts = <String, int>{};
+    for (final r in _routeHistory) {
+      final a = r['algorithm_used'] as String? ?? '';
+      if (a.isNotEmpty) algoCounts[a] = (algoCounts[a] ?? 0) + 1;
+    }
+    if (algoCounts.isNotEmpty) {
+      _topAlgo = algoCounts.entries.reduce((a, b) => a.value >= b.value ? a : b).key;
+    }
   }
 
   void _compute() {
@@ -247,6 +278,57 @@ class _StatsScreenState extends State<StatsScreen>
         ),
         const SizedBox(height: 16),
 
+        // Rota istatistikleri
+        if (_totalRoutes > 0) ...[
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+                color: surf, borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: border)),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Container(
+                  width: 28, height: 28,
+                  decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                          colors: [Color(0xFF6366F1), Color(0xFF8B5CF6)]),
+                      borderRadius: BorderRadius.circular(8)),
+                  child: const Icon(Icons.route_rounded, color: Colors.white, size: 14),
+                ),
+                const SizedBox(width: 10),
+                Text('Rota Optimizasyonları',
+                    style: TextStyle(color: ts, fontSize: 13, fontWeight: FontWeight.w600)),
+              ]),
+              const SizedBox(height: 12),
+              Row(children: [
+                Expanded(child: _statCard('$_totalRoutes', 'Toplam Rota',
+                    const Color(0xFF6366F1), Icons.route_rounded, surf, border)),
+                const SizedBox(width: 10),
+                Expanded(child: _statCard('${_totalKmSaved.toStringAsFixed(0)} km', 'Toplam Mesafe',
+                    AppColors.info, Icons.straighten_rounded, surf, border)),
+              ]),
+              if (_topAlgo.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF6366F1).withOpacity(0.07),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(children: [
+                    const Icon(Icons.psychology_outlined, color: Color(0xFF6366F1), size: 14),
+                    const SizedBox(width: 8),
+                    Text('En çok kullanılan: ${_algoLabel(_topAlgo)}',
+                        style: const TextStyle(color: Color(0xFF6366F1),
+                            fontSize: 12, fontWeight: FontWeight.w600)),
+                  ]),
+                ),
+              ],
+            ]),
+          ),
+          const SizedBox(height: 16),
+        ],
+
         // Önceliğe göre dağılım
         Container(
           padding: const EdgeInsets.all(20),
@@ -429,6 +511,17 @@ class _StatsScreenState extends State<StatsScreen>
             fontSize: 11)),
       ]),
     );
+  }
+
+  String _algoLabel(String key) {
+    switch (key) {
+      case 'genetic':             return 'Genetik Algoritma';
+      case 'simulated_annealing': return 'Simüle Tavlama';
+      case 'ant_colony':          return 'Karınca Kolonisi';
+      case 'tabu_search':         return 'Tabu Arama';
+      case 'lin_kernighan':       return 'Lin-Kernighan';
+      default:                    return key;
+    }
   }
 
   Widget _legendItem(Color color, String label, Color ts) {

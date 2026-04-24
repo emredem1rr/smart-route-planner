@@ -259,7 +259,9 @@ class _RouteResultScreenState extends State<RouteResultScreen>
   // ── Paylaşım ───────────────────────────────────────────────
 
   String _buildShareText(RouteResult sonuc) {
-    final b   = StringBuffer('Bugünkü rotam 📍\n\n');
+    const sep = '━━━━━━━━━━━━━━';
+    final nums = ['1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣','🔟'];
+    final b   = StringBuffer('📍 Bugünkü Rotam\n$sep\n');
     final now = DateTime.now();
     int cumMin = now.hour * 60 + now.minute;
 
@@ -268,16 +270,20 @@ class _RouteResultScreenState extends State<RouteResultScreen>
       final segMin = (sonuc.segmentTimes != null && i < sonuc.segmentTimes!.length)
           ? sonuc.segmentTimes![i].round() : 0;
       cumMin += segMin;
-      final h = (cumMin ~/ 60 % 24).toString().padLeft(2, '0');
-      final m = (cumMin % 60).toString().padLeft(2, '0');
-      b.writeln('${i + 1}.Durak: ${task.name} ($h:$m)');
-      if (task.address.isNotEmpty) b.writeln('   📍 ${task.address}');
+      final h  = (cumMin ~/ 60 % 24).toString().padLeft(2, '0');
+      final m  = (cumMin % 60).toString().padLeft(2, '0');
+      final em = i < nums.length ? nums[i] : '${i+1}.';
+      b.writeln('$em ${task.name} — $h:$m');
+      if (task.address.isNotEmpty) {
+        b.writeln('   📌 ${task.address} | ⏱ ${task.duration} dk');
+      } else {
+        b.writeln('   ⏱ ${task.duration} dk');
+      }
+      b.writeln(sep);
     }
 
-    b.writeln('\nToplam: ${sonuc.totalDistance.toStringAsFixed(1)} km, '
-        '${sonuc.totalTravelTime.round()} dk '
-        '(${_algoLabel(sonuc.algorithmUsed)})');
-    b.writeln('\nSmart Route Planner ile oluşturuldu.');
+    b.writeln('📊 Toplam: ${sonuc.totalDistance.toStringAsFixed(1)} km | ${sonuc.totalTravelTime.round()} dakika');
+    b.writeln('🤖 Smart Route Planner ile optimize edildi');
     return b.toString();
   }
 
@@ -540,10 +546,30 @@ class _RouteResultScreenState extends State<RouteResultScreen>
           ],
         ),
         const SizedBox(height: 8),
+        Row(children: [
+          if (sonuc.trafficUsed)
+            _infoBadge('🚦 Trafik verisi aktif', AppColors.success)
+          else if (sonuc.usedRealRoads)
+            _infoBadge('🗺️ Gerçek yol verisi', AppColors.info)
+          else
+            _infoBadge('📐 Tahmini mesafe', ts),
+        ]),
+        const SizedBox(height: 6),
         Divider(height: 1, color: border),
       ]),
     );
   }
+
+  Widget _infoBadge(String label, Color color) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    decoration: BoxDecoration(
+      color: color.withOpacity(0.10),
+      borderRadius: BorderRadius.circular(6),
+      border: Border.all(color: color.withOpacity(0.3)),
+    ),
+    child: Text(label, style: TextStyle(
+        color: color, fontSize: 10, fontWeight: FontWeight.w600)),
+  );
 
   Widget _dividerV(Color border) =>
       Container(width: 1, height: 32, color: border);
@@ -608,51 +634,87 @@ class _RouteResultScreenState extends State<RouteResultScreen>
             child: _summaryCard(sonuc, surf, border, tp, ts),
           ),
         ),
-        if (sonuc.aiExplanation != null && sonuc.aiExplanation!.isNotEmpty)
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    const Color(0xFF7C3AED).withOpacity(0.10),
+                    const Color(0xFF6366F1).withOpacity(0.06),
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                    color: const Color(0xFF7C3AED).withOpacity(0.30)),
+              ),
+              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Container(
+                  width: 32, height: 32,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF7C3AED).withOpacity(0.14),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.auto_awesome,
+                      color: Color(0xFF7C3AED), size: 16),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('✨ Yapay Zekâ Analizi',
+                          style: TextStyle(
+                            color: Color(0xFF7C3AED),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          )),
+                      const SizedBox(height: 4),
+                      Text(
+                        sonuc.aiExplanation != null && sonuc.aiExplanation!.isNotEmpty
+                            ? sonuc.aiExplanation!
+                            : '${sonuc.orderedTasks.length} görev ${sonuc.totalDistance.toStringAsFixed(1)} km mesafe ve yaklaşık ${sonuc.totalTravelTime.round()} dakika seyahat süresiyle optimize edildi. ${_algoLabel(sonuc.algorithmUsed)} algoritması kullanılarak en verimli rota sırası belirlendi.',
+                        style: TextStyle(color: tp, fontSize: 13, height: 1.45),
+                      ),
+                    ],
+                  ),
+                ),
+              ]),
+            ),
+          ),
+        ),
+        if (sonuc.improvementPercent != null && sonuc.improvementPercent! > 0)
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
               child: Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      const Color(0xFF6366F1).withOpacity(0.08),
-                      const Color(0xFF8B5CF6).withOpacity(0.05),
-                    ],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
+                  color: AppColors.success.withOpacity(0.07),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                      color: const Color(0xFF6366F1).withOpacity(0.25)),
+                  border: Border.all(color: AppColors.success.withOpacity(0.3)),
                 ),
-                child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Container(
-                    width: 32, height: 32,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF6366F1).withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: const Icon(Icons.auto_awesome,
-                        color: Color(0xFF6366F1), size: 16),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const Row(children: [
+                    Icon(Icons.bar_chart_rounded, color: AppColors.success, size: 16),
+                    SizedBox(width: 6),
+                    Text('📊 Optimizasyon Etkisi',
+                        style: TextStyle(color: AppColors.success,
+                            fontSize: 12, fontWeight: FontWeight.w700)),
+                  ]),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Manuel plana göre %${sonuc.improvementPercent!.toStringAsFixed(1)} daha kısa rota',
+                    style: TextStyle(color: tp, fontSize: 13, fontWeight: FontWeight.w600),
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('AI Rota Açıklaması',
-                            style: TextStyle(
-                              color: const Color(0xFF6366F1),
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                            )),
-                        const SizedBox(height: 4),
-                        Text(sonuc.aiExplanation!,
-                            style: TextStyle(color: tp, fontSize: 13, height: 1.45)),
-                      ],
-                    ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Yaklaşık ${sonuc.kmSaved!.toStringAsFixed(1)} km ve ${sonuc.minutesSaved!.toStringAsFixed(0)} dakika tasarruf',
+                    style: TextStyle(color: ts, fontSize: 12),
                   ),
                 ]),
               ),

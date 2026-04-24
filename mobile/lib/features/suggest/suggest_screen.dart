@@ -13,6 +13,7 @@ import '../../core/services/api_service.dart';
 import '../../core/services/sync_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../route/route_result_screen.dart';
+import '../../core/services/background_task_service.dart';
 
 // ── Modeller ──────────────────────────────────────────────────────────────────
 
@@ -333,22 +334,27 @@ class _SuggestScreenState extends State<SuggestScreen> with AutomaticKeepAliveCl
     if (!background && mounted) setState(() => _catLoading[category] = true);
     try {
       final taskHistory = await _fetchTaskHistory();
-      final resp = await http.post(
-        Uri.parse('${ApiConstants.optimizationBaseUrl}/suggest'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'city'         : city,
-          'district'     : _districtCtrl.text.trim(),
-          'category'     : category,
-          'subcategory'  : subcategory,
-          'radius_km'    : radius,
-          'api_key'      : ApiConstants.googleApiKey,
-          'max_results'  : int.tryParse(_maxCtrl.text) ?? 8,
-          'preferences'  : _prefs.toJson(),
-          'filters'      : _activeFilters.toList(),
-          'task_history' : taskHistory,
-        }),
-      ).timeout(const Duration(seconds: 120));
+      final resp = await BackgroundTaskService().run<http.Response>(
+        'suggest_$cacheKey',
+        () => http.post(
+          Uri.parse('${ApiConstants.optimizationBaseUrl}/suggest'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'city'         : city,
+            'district'     : _districtCtrl.text.trim(),
+            'category'     : category,
+            'subcategory'  : subcategory,
+            'radius_km'    : radius,
+            'api_key'      : ApiConstants.googleApiKey,
+            'max_results'  : int.tryParse(_maxCtrl.text) ?? 8,
+            'preferences'  : _prefs.toJson(),
+            'filters'      : _activeFilters.toList(),
+            'task_history' : taskHistory,
+          }),
+        ).timeout(const Duration(seconds: 120)),
+      );
+      BackgroundTaskService().clear('suggest_$cacheKey');
+      if (resp == null) throw Exception('Yanıt alınamadı');
 
       final data = jsonDecode(resp.body);
       if (data['success'] == true) {
@@ -618,7 +624,7 @@ class _SuggestScreenState extends State<SuggestScreen> with AutomaticKeepAliveCl
 
     return Scaffold(
       backgroundColor: bg,
-      resizeToAvoidBottomInset: false,
+      resizeToAvoidBottomInset: true,
       floatingActionButton: FloatingActionButton(
         onPressed: () => _showCategoryPicker(context),
         backgroundColor: const Color(0xFF6366F1),

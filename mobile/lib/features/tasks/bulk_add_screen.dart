@@ -18,9 +18,10 @@ class _BulkAddScreenState extends State<BulkAddScreen> {
   bool _saving = false;
 
   // Hızlı ekle state
-  int    _priority = 3;
-  int    _duration = 30;
-  TimeOfDay _time  = TimeOfDay.now();
+  int      _priority = 3;
+  int      _duration = 30;
+  TimeOfDay _time    = TimeOfDay.now();
+  DateTime  _date    = DateTime.now();
 
   @override
   void dispose() {
@@ -40,6 +41,7 @@ class _BulkAddScreenState extends State<BulkAddScreen> {
         priority: _priority,
         duration: _duration,
         time:     _time,
+        date:     _date,
       ));
       _nameCtrl.clear();
       _addrCtrl.clear();
@@ -49,10 +51,10 @@ class _BulkAddScreenState extends State<BulkAddScreen> {
   Future<void> _saveAll() async {
     if (_items.isEmpty) return;
     setState(() => _saving = true);
-    final now    = DateTime.now();
-    final today  = '${now.year}-${now.month.toString().padLeft(2,'0')}-${now.day.toString().padLeft(2,'0')}';
     int saved = 0;
     for (final item in _items) {
+      final d = item.date;
+      final dateStr = '${d.year}-${d.month.toString().padLeft(2,'0')}-${d.day.toString().padLeft(2,'0')}';
       final es = item.time.hour * 60 + item.time.minute;
       final task = TaskModel(
         id:            0,
@@ -64,7 +66,7 @@ class _BulkAddScreenState extends State<BulkAddScreen> {
         priority:      item.priority,
         earliestStart: es,
         latestFinish:  es + item.duration,
-        taskDate:      today,
+        taskDate:      dateStr,
       );
       final ok = await _auth.saveRemoteTask(task);
       if (ok) saved++;
@@ -89,6 +91,68 @@ class _BulkAddScreenState extends State<BulkAddScreen> {
           child: child!),
     );
     if (t != null) setState(() => _time = t);
+  }
+
+  Future<void> _pickDate() async {
+    final surf = AppColors.surface(context);
+    final tp   = AppColors.textPrimary(context);
+    final now  = DateTime.now();
+    final today    = DateTime(now.year, now.month, now.day);
+    final tomorrow = today.add(const Duration(days: 1));
+
+    final quick = await showDialog<DateTime>(
+      context: context,
+      builder: (_) => SimpleDialog(
+        backgroundColor: surf,
+        title: Text('Tarih Seç', style: TextStyle(color: tp, fontWeight: FontWeight.w700)),
+        children: [
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(context, today),
+            child: Row(children: [
+              const Icon(Icons.today_rounded, size: 16, color: AppColors.orange),
+              const SizedBox(width: 8),
+              Text('Bugün (${today.day}.${today.month.toString().padLeft(2,'0')})',
+                  style: TextStyle(color: tp)),
+            ]),
+          ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(context, tomorrow),
+            child: Row(children: [
+              const Icon(Icons.event_rounded, size: 16, color: AppColors.orange),
+              const SizedBox(width: 8),
+              Text('Yarın (${tomorrow.day}.${tomorrow.month.toString().padLeft(2,'0')})',
+                  style: TextStyle(color: tp)),
+            ]),
+          ),
+          SimpleDialogOption(
+            onPressed: () async {
+              final d = await showDatePicker(
+                context: context,
+                initialDate: _date,
+                firstDate:   today,
+                lastDate:    today.add(const Duration(days: 365)),
+              );
+              if (d != null && context.mounted) Navigator.pop(context, d);
+            },
+            child: Row(children: [
+              const Icon(Icons.calendar_month_rounded, size: 16, color: AppColors.orange),
+              const SizedBox(width: 8),
+              Text('Özel Tarih...', style: TextStyle(color: tp)),
+            ]),
+          ),
+        ],
+      ),
+    );
+    if (quick != null) setState(() => _date = quick);
+  }
+
+  String get _dateLabel {
+    final now   = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final d     = DateTime(_date.year, _date.month, _date.day);
+    if (d == today) return 'Bugün';
+    if (d == today.add(const Duration(days: 1))) return 'Yarın';
+    return '${_date.day}.${_date.month.toString().padLeft(2,'0')}';
   }
 
   @override
@@ -199,49 +263,59 @@ class _BulkAddScreenState extends State<BulkAddScreen> {
               ),
             ),
             const SizedBox(height: 10),
-            // Süre + Saat + Öncelik
+            // Tarih + Süre + Saat + Öncelik — kaydırılabilir, Ekle sağda sabit
             Row(children: [
-              // Süre
-              _chip('${_duration}dk', Icons.timer_outlined, ts, () async {
-                final opts = [15, 30, 45, 60, 90, 120];
-                final idx  = await showDialog<int>(
-                  context: context,
-                  builder: (_) => SimpleDialog(
-                    backgroundColor: surf,
-                    title: Text('Süre', style: TextStyle(color: tp)),
-                    children: opts.map((m) => SimpleDialogOption(
-                      onPressed: () => Navigator.pop(context, m),
-                      child: Text('$m dk', style: TextStyle(color: tp)),
-                    )).toList(),
-                  ),
-                );
-                if (idx != null) setState(() => _duration = idx);
-              }),
-              const SizedBox(width: 8),
-              // Saat
-              _chip(
-                '${_time.hour.toString().padLeft(2,'0')}:${_time.minute.toString().padLeft(2,'0')}',
-                Icons.access_time, ts, _pickTime,
+              Expanded(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(children: [
+                    // Tarih
+                    _chip(_dateLabel, Icons.calendar_today_outlined, ts, _pickDate),
+                    const SizedBox(width: 8),
+                    // Süre
+                    _chip('${_duration}dk', Icons.timer_outlined, ts, () async {
+                      final opts = [15, 30, 45, 60, 90, 120];
+                      final idx  = await showDialog<int>(
+                        context: context,
+                        builder: (_) => SimpleDialog(
+                          backgroundColor: surf,
+                          title: Text('Süre', style: TextStyle(color: tp)),
+                          children: opts.map((m) => SimpleDialogOption(
+                            onPressed: () => Navigator.pop(context, m),
+                            child: Text('$m dk', style: TextStyle(color: tp)),
+                          )).toList(),
+                        ),
+                      );
+                      if (idx != null) setState(() => _duration = idx);
+                    }),
+                    const SizedBox(width: 8),
+                    // Saat
+                    _chip(
+                      '${_time.hour.toString().padLeft(2,'0')}:${_time.minute.toString().padLeft(2,'0')}',
+                      Icons.access_time, ts, _pickTime,
+                    ),
+                    const SizedBox(width: 8),
+                    // Öncelik
+                    _chip('Öncelik $_priority', Icons.flag_outlined, ts, () async {
+                      final p = await showDialog<int>(
+                        context: context,
+                        builder: (_) => SimpleDialog(
+                          backgroundColor: surf,
+                          title: Text('Öncelik', style: TextStyle(color: tp)),
+                          children: [1,2,3,4,5].map((v) => SimpleDialogOption(
+                            onPressed: () => Navigator.pop(context, v),
+                            child: Text(['Çok Düşük','Düşük','Orta','Yüksek','Çok Yüksek'][v-1],
+                                style: TextStyle(color: tp)),
+                          )).toList(),
+                        ),
+                      );
+                      if (p != null) setState(() => _priority = p);
+                    }),
+                  ]),
+                ),
               ),
               const SizedBox(width: 8),
-              // Öncelik
-              _chip('Öncelik $_priority', Icons.flag_outlined, ts, () async {
-                final p = await showDialog<int>(
-                  context: context,
-                  builder: (_) => SimpleDialog(
-                    backgroundColor: surf,
-                    title: Text('Öncelik', style: TextStyle(color: tp)),
-                    children: [1,2,3,4,5].map((v) => SimpleDialogOption(
-                      onPressed: () => Navigator.pop(context, v),
-                      child: Text(['Çok Düşük','Düşük','Orta','Yüksek','Çok Yüksek'][v-1],
-                          style: TextStyle(color: tp)),
-                    )).toList(),
-                  ),
-                );
-                if (p != null) setState(() => _priority = p);
-              }),
-              const Spacer(),
-              // Ekle butonu
+              // Ekle butonu (sağda sabit)
               GestureDetector(
                 onTap: _addItem,
                 child: Container(
@@ -304,7 +378,7 @@ class _BulkAddScreenState extends State<BulkAddScreen> {
                         Text(item.name, style: TextStyle(color: tp,
                             fontWeight: FontWeight.w600, fontSize: 14)),
                         Text(
-                          '${item.time.hour.toString().padLeft(2,'0')}:${item.time.minute.toString().padLeft(2,'0')}  ·  ${item.duration} dk'
+                          '${_itemDateLabel(item.date)}  ·  ${item.time.hour.toString().padLeft(2,'0')}:${item.time.minute.toString().padLeft(2,'0')}  ·  ${item.duration} dk'
                               '${item.address.isNotEmpty ? "  ·  ${item.address}" : ""}',
                           style: TextStyle(color: ts, fontSize: 12),
                           maxLines: 1, overflow: TextOverflow.ellipsis,
@@ -321,6 +395,15 @@ class _BulkAddScreenState extends State<BulkAddScreen> {
         ),
       ]),
     );
+  }
+
+  String _itemDateLabel(DateTime d) {
+    final now   = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final dd    = DateTime(d.year, d.month, d.day);
+    if (dd == today) return 'Bugün';
+    if (dd == today.add(const Duration(days: 1))) return 'Yarın';
+    return '${d.day}.${d.month.toString().padLeft(2,'0')}';
   }
 
   Widget _chip(String label, IconData icon, Color ts, VoidCallback onTap) {
@@ -347,9 +430,10 @@ class _BulkTask {
   final String    name, address;
   final int       priority, duration;
   final TimeOfDay time;
+  final DateTime  date;
   _BulkTask({
     required this.name, required this.address,
     required this.priority, required this.duration,
-    required this.time,
+    required this.time, required this.date,
   });
 }

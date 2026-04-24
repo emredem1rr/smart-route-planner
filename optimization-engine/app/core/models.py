@@ -44,17 +44,22 @@ class OptimizeRequest(BaseModel):
 
 
 class RouteResult(BaseModel):
-    ordered_tasks:     list[TaskModel]
-    total_distance:    float
-    total_travel_time: float
-    fitness_score:     float
-    algorithm_used:    str
-    heuristic_used:    str
-    execution_time_ms: float
-    used_real_roads:   bool                              = False
-    route_geometry:    Optional[list[list[float]]]       = None  # [[lat,lon], ...]
-    segment_times:     Optional[list[float]]             = None  # dakika cinsinden her segment
-    ai_explanation:    Optional[str]                     = None  # Gemini rota açıklaması
+    ordered_tasks:          list[TaskModel]
+    total_distance:         float
+    total_travel_time:      float
+    fitness_score:          float
+    algorithm_used:         str
+    heuristic_used:         str
+    execution_time_ms:      float
+    used_real_roads:        bool                         = False
+    traffic_used:           bool                         = False
+    route_geometry:         Optional[list[list[float]]]  = None
+    segment_times:          Optional[list[float]]        = None
+    ai_explanation:         Optional[str]                = None
+    manual_distance:        Optional[float]              = None  # görev ekleme sırasıyla km
+    improvement_percent:    Optional[float]              = None  # ((manuel-optimize)/manuel*100)
+    km_saved:               Optional[float]              = None
+    minutes_saved:          Optional[float]              = None
 
 
 class AlgorithmLog(BaseModel):

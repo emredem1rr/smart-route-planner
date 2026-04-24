@@ -2,8 +2,9 @@
 Gerçek Hayat Senaryoları — Samsun/Amasya koordinatları ile TSP benchmark.
 """
 import math, time, re, json, asyncio
-from fastapi  import APIRouter
+from fastapi  import APIRouter, Query
 from pydantic import BaseModel
+from typing   import Optional
 from ..core.models import TaskModel, OptimizationConfig
 from ..algorithms.genetic             import run_genetic_algorithm
 from ..algorithms.simulated_annealing import run_simulated_annealing
@@ -86,7 +87,9 @@ class BenchResult(BaseModel):
     algorithm         : str
     total_distance_km : float
     execution_time_ms : float
-    route_order       : list[str]  # durak adları sırasıyla
+    route_order       : list[str]
+    gap_vs_best       : float = 0.0   # % fark — en iyi algoritmaya göre
+    gap_vs_manual     : float = 0.0   # % fark — manuel sıraya göre
 
 
 def _run_scenario(stops: list[dict], config: OptimizationConfig) -> list[BenchResult]:
@@ -170,14 +173,18 @@ async def _interpret(scenario_label: str, results: list[BenchResult]) -> str:
 
 # ── Response Modeli ────────────────────────────────────────────────────────────
 class ScenarioResult(BaseModel):
-    label              : str
-    city               : str
-    n_stops            : int
-    results            : list[BenchResult]
-    winner             : str
-    winner_distance_km : float
-    ai_interpretation  : str
-    execution_time_ms  : float
+    scenario_key              : str   = ""
+    label                     : str
+    city                      : str
+    n_stops                   : int
+    results                   : list[BenchResult]
+    winner                    : str
+    winner_distance_km        : float
+    manual_distance_km        : float = 0.0
+    improvement_vs_manual_pct : float = 0.0  # ((manuel - best) / manuel * 100)
+    km_saved                  : float = 0.0
+    ai_interpretation         : str
+    execution_time_ms         : float
 
 
 class RealWorldResponse(BaseModel):
@@ -188,7 +195,7 @@ class RealWorldResponse(BaseModel):
 
 # ── Endpoint ───────────────────────────────────────────────────────────────────
 @router.get('/benchmark/real-world', response_model=RealWorldResponse)
-async def real_world_benchmark():
+async def real_world_benchmark(scenario: Optional[str] = Query(default=None)):
     config = OptimizationConfig(
         heuristic       = 'euclidean',
         population_size = 80,
@@ -198,26 +205,52 @@ async def real_world_benchmark():
         use_traffic     = False,
     )
 
-    scenario_results: list[ScenarioResult] = []
-    total_t0 = time.perf_counter()
+    keys_to_run = (
+        [scenario] if scenario and scenario in SCENARIOS
+        else list(SCENARIOS.keys())
+    )
 
-    for key, sc in SCENARIOS.items():
+    scenario_results: list[ScenarioResult] = []
+
+    for key in keys_to_run:
+        sc      = SCENARIOS[key]
+        stops   = sc['stops']
         t0      = time.perf_counter()
-        results = await asyncio.to_thread(_run_scenario, sc['stops'], config)
+        results = await asyncio.to_thread(_run_scenario, stops, config)
         elapsed = (time.perf_counter() - t0) * 1000
 
-        best = min(results, key=lambda r: r.total_distance_km)
+        best       = min(results, key=lambda r: r.total_distance_km)
+        best_dist  = best.total_distance_km
+
+        # Manuel mesafe: orijinal durak sırasıyla
+        dist_mat      = _dist_matrix(stops)
+        manual_dist   = round(
+            dist_mat[0][1] + sum(dist_mat[i][i + 1] for i in range(1, len(stops) - 1)),
+            2,
+        )
+        improv_pct = round((manual_dist - best_dist) / manual_dist * 100, 1) if manual_dist > 0 else 0.0
+        km_saved   = round(manual_dist - best_dist, 2)
+
+        # Gap hesapla: her algoritmanın en iyiye ve manüele göre farkı
+        for r in results:
+            r.gap_vs_best   = round((r.total_distance_km - best_dist) / best_dist * 100, 1) if best_dist > 0 else 0.0
+            r.gap_vs_manual = round((manual_dist - r.total_distance_km) / manual_dist * 100, 1) if manual_dist > 0 else 0.0
+
         interp = await _interpret(sc['label'], results)
 
         scenario_results.append(ScenarioResult(
-            label              = sc['label'],
-            city               = sc['city'],
-            n_stops            = len(sc['stops']),
-            results            = results,
-            winner             = best.algorithm,
-            winner_distance_km = best.total_distance_km,
-            ai_interpretation  = interp,
-            execution_time_ms  = round(elapsed, 1),
+            scenario_key              = key,
+            label                     = sc['label'],
+            city                      = sc['city'],
+            n_stops                   = len(stops),
+            results                   = results,
+            winner                    = best.algorithm,
+            winner_distance_km        = best_dist,
+            manual_distance_km        = manual_dist,
+            improvement_vs_manual_pct = improv_pct,
+            km_saved                  = km_saved,
+            ai_interpretation         = interp,
+            execution_time_ms         = round(elapsed, 1),
         ))
 
     return RealWorldResponse(success=True, scenarios=scenario_results)

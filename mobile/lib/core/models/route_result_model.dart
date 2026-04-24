@@ -9,9 +9,14 @@ class RouteResult {
   final String          heuristicUsed;
   final double          executionTimeMs;
   final bool            usedRealRoads;
+  final bool            trafficUsed;
   final List<List<double>>? routeGeometry;
-  final List<double>?   segmentTimes;   // dakika, her segment için  // [[lat,lon], ...]
-  final String?         aiExplanation;  // Gemini rota açıklaması
+  final List<double>?   segmentTimes;
+  final String?         aiExplanation;
+  final double?         manualDistance;
+  final double?         improvementPercent;
+  final double?         kmSaved;
+  final double?         minutesSaved;
 
   RouteResult({
     required this.orderedTasks,
@@ -21,47 +26,65 @@ class RouteResult {
     required this.algorithmUsed,
     required this.heuristicUsed,
     required this.executionTimeMs,
-    this.usedRealRoads  = false,
+    this.usedRealRoads      = false,
+    this.trafficUsed        = false,
     this.routeGeometry,
     this.segmentTimes,
     this.aiExplanation,
+    this.manualDistance,
+    this.improvementPercent,
+    this.kmSaved,
+    this.minutesSaved,
   });
 
   factory RouteResult.fromJson(Map<String, dynamic> j) => RouteResult(
-    orderedTasks    : (j['ordered_tasks'] as List)
+    orderedTasks       : (j['ordered_tasks'] as List)
         .map((t) => TaskModel.fromJson(t as Map<String, dynamic>))
         .toList(),
-    totalDistance   : (j['total_distance']   ?? 0).toDouble(),
-    totalTravelTime : (j['total_travel_time'] ?? 0).toDouble(),
-    fitnessScore    : (j['fitness_score']     ?? 0).toDouble(),
-    algorithmUsed   : j['algorithm_used']     ?? '',
-    heuristicUsed   : j['heuristic_used']     ?? '',
-    executionTimeMs : (j['execution_time_ms'] ?? 0).toDouble(),
-    usedRealRoads   : j['used_real_roads']    ?? false,
-    routeGeometry   : j['route_geometry'] != null
+    totalDistance      : (j['total_distance']    ?? 0).toDouble(),
+    totalTravelTime    : (j['total_travel_time']  ?? 0).toDouble(),
+    fitnessScore       : (j['fitness_score']      ?? 0).toDouble(),
+    algorithmUsed      : j['algorithm_used']      ?? '',
+    heuristicUsed      : j['heuristic_used']      ?? '',
+    executionTimeMs    : (j['execution_time_ms']  ?? 0).toDouble(),
+    usedRealRoads      : j['used_real_roads']     ?? false,
+    trafficUsed        : j['traffic_used']        ?? false,
+    routeGeometry      : j['route_geometry'] != null
         ? (j['route_geometry'] as List)
-        .map((p) => (p as List).map((v) => (v as num).toDouble()).toList())
-        .toList()
+            .map((p) => (p as List).map((v) => (v as num).toDouble()).toList())
+            .toList()
         : null,
-    segmentTimes    : j['segment_times'] != null
-        ? (j['segment_times'] as List)
-        .map((v) => (v as num).toDouble()).toList()
+    segmentTimes       : j['segment_times'] != null
+        ? (j['segment_times'] as List).map((v) => (v as num).toDouble()).toList()
         : null,
-    aiExplanation   : j['ai_explanation'] as String?,
+    aiExplanation      : j['ai_explanation']      as String?,
+    manualDistance     : j['manual_distance']     != null
+        ? (j['manual_distance'] as num).toDouble() : null,
+    improvementPercent : j['improvement_percent'] != null
+        ? (j['improvement_percent'] as num).toDouble() : null,
+    kmSaved            : j['km_saved'] != null
+        ? (j['km_saved'] as num).toDouble() : null,
+    minutesSaved       : j['minutes_saved'] != null
+        ? (j['minutes_saved'] as num).toDouble() : null,
   );
 
   Map<String, dynamic> toJson() => {
-    'ordered_tasks'    : orderedTasks.map((t) => t.toJson()).toList(),
-    'total_distance'   : totalDistance,
-    'total_travel_time': totalTravelTime,
-    'fitness_score'    : fitnessScore,
-    'algorithm_used'   : algorithmUsed,
-    'heuristic_used'   : heuristicUsed,
-    'execution_time_ms': executionTimeMs,
-    'used_real_roads'  : usedRealRoads,
-    'route_geometry'   : routeGeometry,
-    'segment_times'    : segmentTimes,
-    'ai_explanation'   : aiExplanation,
+    'ordered_tasks'      : orderedTasks.map((t) => t.toJson()).toList(),
+    'total_distance'     : totalDistance,
+    'total_travel_time'  : totalTravelTime,
+    'fitness_score'      : fitnessScore,
+    'algorithm_used'     : algorithmUsed,
+    'heuristic_used'     : heuristicUsed,
+    'execution_time_ms'  : executionTimeMs,
+    'used_real_roads'    : usedRealRoads,
+    'traffic_used'       : trafficUsed,
+    'route_geometry'     : routeGeometry,
+    'segment_times'      : segmentTimes,
+    'ai_explanation'     : aiExplanation,
+    'manual_distance'    : manualDistance,
+    'improvement_percent': improvementPercent,
+    'km_saved'           : kmSaved,
+    'minutes_saved'      : minutesSaved,
   };
 }
 

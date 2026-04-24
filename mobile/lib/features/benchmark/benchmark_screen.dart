@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'package:file_picker/file_picker.dart';
 import '../../core/constants/api_constants.dart';
 import '../../core/providers/settings_provider.dart';
+import '../../core/services/background_task_service.dart';
 import '../../core/services/storage_service.dart';
 import '../../core/theme/app_theme.dart';
 
@@ -65,10 +66,10 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
   List<Map<String, dynamic>> _history = [];
   bool _showHistory = false;
 
-  // ── Gerçek hayat sekmesi ──────────────────────────────────
-  bool          _rwLoading   = false;
-  String?       _rwError;
-  List<dynamic> _rwScenarios = [];
+  // ── Gerçek hayat sekmesi — per-scenario state ────────────
+  static final Map<String, bool>    _rwLoading   = {};
+  static final Map<String, String?> _rwError     = {};
+  static final Map<String, dynamic> _rwResults   = {};  // key → scenario map
 
   // ── Özel dataset yükleme ──────────────────────────────────
   List<List<double>> _customCoords  = [];
@@ -96,6 +97,7 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
     if (!_prefsLoaded) {
       _prefsLoaded = true;
       _loadAllFromPrefs();
+      _loadRwFromPrefs();
     }
   }
 
@@ -207,26 +209,49 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
     }
   }
 
-  // ── Gerçek Hayat benchmark ────────────────────────────────
-  Future<void> _runRealWorld() async {
-    setState(() { _rwLoading = true; _rwError = null; _rwScenarios = []; });
-    try {
-      final response = await http
-          .get(Uri.parse('${ApiConstants.optimizationBaseUrl}/benchmark/real-world'))
-          .timeout(const Duration(seconds: 300));
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      if (data['success'] == true) {
-        setState(() => _rwScenarios = data['scenarios'] as List);
-      } else {
-        setState(() => _rwError = data['error'] ?? 'Hata oluştu.');
+  Future<void> _loadRwFromPrefs() async {
+    for (final key in ['kurye', 'satis', 'saglik']) {
+      final raw = await StorageService().getString('rw_result_$key');
+      if (raw != null && raw.isNotEmpty) {
+        try {
+          _rwResults[key] = jsonDecode(raw);
+          if (mounted) setState(() {});
+        } catch (_) {}
       }
-    } on SocketException {
-      setState(() => _rwError = 'Sunucuya bağlanılamadı. İnternet bağlantınızı kontrol edin.');
-    } catch (e) {
-      setState(() => _rwError = 'Hata oluştu.');
-    } finally {
-      setState(() => _rwLoading = false);
     }
+  }
+
+  // ── Per-scenario Gerçek Hayat çalıştır ───────────────────
+  Future<void> _runScenario(String scenarioKey) async {
+    if (_rwLoading[scenarioKey] == true) return;
+    final bgKey = 'rw_$scenarioKey';
+    if (BackgroundTaskService().isRunning(bgKey)) return;
+
+    _rwLoading[scenarioKey] = true;
+    _rwError[scenarioKey]   = null;
+    if (mounted) setState(() {});
+
+    final url = '${ApiConstants.optimizationBaseUrl}/benchmark/real-world?scenario=$scenarioKey';
+    BackgroundTaskService().run<Map<String, dynamic>?>(bgKey, () async {
+      final resp = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 300));
+      final data = jsonDecode(resp.body) as Map<String, dynamic>;
+      if (data['success'] == true) {
+        final scenarios = data['scenarios'] as List;
+        if (scenarios.isNotEmpty) return scenarios.first as Map<String, dynamic>;
+      }
+      return null;
+    }).then((sc) async {
+      _rwLoading[scenarioKey] = false;
+      BackgroundTaskService().clear(bgKey);
+      if (sc != null) {
+        _rwResults[scenarioKey] = sc;
+        _rwError[scenarioKey]   = null;
+        await StorageService().setString('rw_result_$scenarioKey', jsonEncode(sc));
+      } else {
+        _rwError[scenarioKey] = 'Senaryo başarısız oldu.';
+      }
+      if (mounted) setState(() {});
+    });
   }
 
   // ── Özel dataset ──────────────────────────────────────────
@@ -234,7 +259,7 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['csv', 'json', 'txt'],
+        allowedExtensions: ['csv', 'json', 'tsp', 'txt'],
         withData: true,
       );
       if (result == null || result.files.isEmpty) return;
@@ -256,14 +281,40 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
         if (data is Map && data['name'] != null) {
           _customNameCtrl.text = data['name'].toString();
         }
+      } else if (name.endsWith('.tsp')) {
+        // TSPLIB formatı: NODE_COORD_SECTION sonrası "id x y" satırları
+        bool inCoordSection = false;
+        for (final rawLine in content.split('\n')) {
+          final line = rawLine.trim();
+          if (line.isEmpty) continue;
+          if (line.toUpperCase() == 'NODE_COORD_SECTION') {
+            inCoordSection = true;
+            continue;
+          }
+          if (line.toUpperCase() == 'EOF' || line.toUpperCase().startsWith('DISPLAY_DATA_SECTION')) break;
+          if (!inCoordSection) continue;
+          final parts = line.split(RegExp(r'\s+'));
+          if (parts.length >= 3) {
+            final x = double.tryParse(parts[1]);
+            final y = double.tryParse(parts[2]);
+            if (x != null && y != null) coords.add([x, y]);
+          }
+        }
       } else {
-        // CSV veya TXT: her satır "x,y" veya "x y"
-        for (final line in content.split('\n')) {
-          final trimmed = line.trim();
-          if (trimmed.isEmpty || trimmed.startsWith('#')) continue;
-          final parts = trimmed.contains(',')
-              ? trimmed.split(',')
-              : trimmed.split(RegExp(r'\s+'));
+        // CSV veya TXT: her satır "id,x,y" veya "x,y" veya "x y"
+        for (final rawLine in content.split('\n')) {
+          final line = rawLine.trim();
+          if (line.isEmpty || line.startsWith('#')) continue;
+          final parts = line.contains(',')
+              ? line.split(',')
+              : line.split(RegExp(r'\s+'));
+          // "id,x,y" formatı (3 sütun, ilki string/int id)
+          if (parts.length >= 3) {
+            final x = double.tryParse(parts[1].trim());
+            final y = double.tryParse(parts[2].trim());
+            if (x != null && y != null) { coords.add([x, y]); continue; }
+          }
+          // "x,y" formatı (2 sütun)
           if (parts.length >= 2) {
             final x = double.tryParse(parts[0].trim());
             final y = double.tryParse(parts[1].trim());
@@ -282,10 +333,10 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
         _customError   = null;
         _customResults = [];
         _customWinner  = '';
-        _customNameCtrl.text = name.replaceAll(RegExp(r'\.(csv|json|txt)$'), '');
+        _customNameCtrl.text = name.replaceAll(RegExp(r'\.(csv|json|tsp|txt)$'), '');
       });
     } catch (e) {
-      setState(() => _customError = 'Dosya okuma hatası.');
+      setState(() => _customError = 'Dosya okuma hatası: $e');
     }
   }
 
@@ -840,88 +891,43 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
 
   // ── Gerçek Hayat Sekmesi ──────────────────────────────────
   Widget _buildRealWorldTab(Color surf, Color border, Color tp, Color ts) {
+    const scenarios = [
+      {'key': 'kurye',  'label': 'Kurye — Samsun, 10 durak',              'desc': 'Sabah 08:00\'de depodan başlayan teslimat rotası.'},
+      {'key': 'satis',  'label': 'Satış Temsilcisi — Amasya, 7 durak',    'desc': 'Farklı öncelikte müşteri ziyaretleri, zaman pencereleri.'},
+      {'key': 'saglik', 'label': 'Sağlık Ziyaretçisi — Amasya, 5 durak', 'desc': 'Kritik zaman pencereli hasta ziyaretleri.'},
+    ];
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 
-        // Açıklama
+        // Başlık
         Container(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
             color:        const Color(0xFF6366F1).withOpacity(0.07),
             borderRadius: BorderRadius.circular(14),
             border:       Border.all(color: const Color(0xFF6366F1).withOpacity(0.25)),
           ),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Row(children: [
-              Icon(Icons.location_city_rounded, color: Color(0xFF6366F1), size: 18),
-              SizedBox(width: 8),
-              Text('Gerçek Hayat Senaryoları',
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: Color(0xFF6366F1))),
-            ]),
-            const SizedBox(height: 8),
-            Text(
-              'Samsun ve Amasya koordinatlı gerçek senaryolar: '
-              'Kurye (10 durak), Satış Temsilcisi (7 durak), Sağlık Ziyaretçisi (5 durak).',
-              style: TextStyle(color: ts, fontSize: 13, height: 1.4),
-            ),
+          child: Row(children: [
+            const Icon(Icons.location_city_rounded, color: Color(0xFF6366F1), size: 18),
+            const SizedBox(width: 8),
+            Expanded(child: Text(
+              'Her senaryo bağımsız çalışır. Ekrandan çıksan bile hesaplama durmaz.',
+              style: TextStyle(color: ts, fontSize: 12, height: 1.4),
+            )),
           ]),
         ),
         const SizedBox(height: 14),
 
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton.icon(
-            onPressed: _rwLoading ? null : _runRealWorld,
-            icon: _rwLoading
-                ? const SizedBox(width: 18, height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                : const Icon(Icons.play_arrow_rounded, size: 20),
-            label: Text(
-              _rwLoading ? 'Senaryolar çalışıyor...' : 'Senaryoları Çalıştır',
-              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
-            ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: _rwLoading ? AppColors.textDim(context) : const Color(0xFF6366F1),
-              foregroundColor: Colors.white,
-              padding:   const EdgeInsets.symmetric(vertical: 14),
-              elevation: 0,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-          ),
-        ),
-
-        if (_rwLoading) ...[
-          const SizedBox(height: 12),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: LinearProgressIndicator(
-                minHeight: 4, backgroundColor: border, color: const Color(0xFF6366F1)),
-          ),
-        ],
-
-        if (_rwError != null) ...[
-          const SizedBox(height: 14),
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color:        AppColors.dangerDim,
-              borderRadius: BorderRadius.circular(12),
-              border:       Border.all(color: AppColors.danger.withOpacity(0.5)),
-            ),
-            child: Row(children: [
-              const Icon(Icons.error_outline, color: AppColors.danger),
-              const SizedBox(width: 10),
-              Expanded(child: Text(_rwError!,
-                  style: const TextStyle(color: AppColors.danger, fontSize: 13))),
-            ]),
-          ),
-        ],
-
-        if (_rwScenarios.isNotEmpty) ...[
-          const SizedBox(height: 20),
-          ..._rwScenarios.map((sc) => _buildScenarioCard(sc, surf, border, tp, ts)),
-        ],
+        // Per-scenario kartlar
+        ...scenarios.map((sc) {
+          final key      = sc['key']!;
+          final loading  = _rwLoading[key] == true || BackgroundTaskService().isRunning('rw_$key');
+          final err      = _rwError[key];
+          final result   = _rwResults[key];
+          return _buildScenarioRunCard(key, sc['label']!, sc['desc']!, loading, err, result, surf, border, tp, ts);
+        }),
 
         // ── Özel Dataset Yükleme ────────────────────────────
         const SizedBox(height: 24),
@@ -930,13 +936,20 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
         Row(children: [
           const Icon(Icons.upload_file_rounded, color: Color(0xFF6366F1), size: 18),
           const SizedBox(width: 8),
-          Text('Özel Dataset Yükle (CSV / JSON)',
+          Text('Özel Dataset Yükle (CSV / JSON / TSP)',
               style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: tp)),
         ]),
         const SizedBox(height: 8),
         Text(
-          'CSV: her satır "x,y" koordinatı. JSON: {"coordinates":[[x,y],...], "optimal":12345, "name":"..."}',
-          style: TextStyle(color: ts, fontSize: 12, height: 1.4),
+          'CSV: "id,x,y" veya "x,y" satırları.\n'
+          'TSPLIB (.tsp): NODE_COORD_SECTION altında "id x y" formatı.\n'
+          'JSON: {"coordinates":[[x,y],...], "optimal":12345, "name":"..."}',
+          style: TextStyle(color: ts, fontSize: 12, height: 1.5),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'TSPLIB örnek dosyalar: comopt.ifi.uni-heidelberg.de/software/TSPLIB95/tsp/',
+          style: TextStyle(color: const Color(0xFF6366F1).withOpacity(0.8), fontSize: 11),
         ),
         const SizedBox(height: 12),
 
@@ -1136,18 +1149,14 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
     );
   }
 
-  Widget _buildScenarioCard(dynamic sc, Color surf, Color border, Color tp, Color ts) {
-    final label       = sc['label']                as String;
-    final city        = sc['city']                 as String;
-    final nStops      = sc['n_stops']              as int;
-    final winner      = sc['winner']               as String;
-    final winnerDist  = (sc['winner_distance_km']  as num).toDouble();
-    final aiInterp    = sc['ai_interpretation']    as String? ?? '';
-    final results     = (sc['results'] as List).cast<Map<String, dynamic>>();
-
+  Widget _buildScenarioRunCard(
+    String key, String label, String desc,
+    bool loading, String? err, dynamic result,
+    Color surf, Color border, Color tp, Color ts,
+  ) {
     return Container(
-      margin:  const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(16),
+      margin:  const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color:        surf,
         borderRadius: BorderRadius.circular(14),
@@ -1155,80 +1164,178 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            decoration: BoxDecoration(
-              color: const Color(0xFF6366F1).withOpacity(0.1),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text(city, style: const TextStyle(
-                color: Color(0xFF6366F1), fontSize: 12, fontWeight: FontWeight.w700)),
-          ),
-          const SizedBox(width: 8),
           Expanded(child: Text(label,
-              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: tp))),
-          Text('$nStops durak', style: TextStyle(color: ts, fontSize: 12)),
-        ]),
-        const SizedBox(height: 10),
-        Container(
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color:        AppColors.success.withOpacity(0.07),
-            borderRadius: BorderRadius.circular(10),
-            border:       Border.all(color: AppColors.success.withOpacity(0.3)),
-          ),
-          child: Row(children: [
-            const Icon(Icons.emoji_events_rounded, color: AppColors.success, size: 16),
-            const SizedBox(width: 8),
-            Text('${_algoLabel(winner)}  ·  ${winnerDist.toStringAsFixed(2)} km',
-                style: const TextStyle(color: AppColors.success,
-                    fontWeight: FontWeight.w700, fontSize: 13)),
-          ]),
-        ),
-        const SizedBox(height: 10),
-        ...results.map((r) {
-          final algo  = r['algorithm']          as String;
-          final dist  = (r['total_distance_km'] as num).toDouble();
-          final ms    = (r['execution_time_ms'] as num).toDouble();
-          final isWin = algo == winner;
-          final color = algoColor(algo);
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 6),
-            child: Row(children: [
-              Container(width: 8, height: 8,
-                  decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
-              const SizedBox(width: 8),
-              Expanded(child: Text(_algoLabel(algo),
-                  style: TextStyle(fontSize: 12,
-                      color: isWin ? AppColors.success : tp,
-                      fontWeight: isWin ? FontWeight.w700 : FontWeight.w400))),
-              Text('${dist.toStringAsFixed(2)} km  ·  ${ms.toStringAsFixed(1)} ms',
-                  style: TextStyle(fontSize: 11, color: isWin ? AppColors.success : ts)),
-            ]),
-          );
-        }),
-        if (aiInterp.isNotEmpty) ...[
-          const SizedBox(height: 10),
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(colors: [
-                const Color(0xFF6366F1).withOpacity(0.07),
-                const Color(0xFF8B5CF6).withOpacity(0.04),
+              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: tp))),
+          GestureDetector(
+            onTap: loading ? null : () => _runScenario(key),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                gradient: loading ? null : const LinearGradient(
+                    colors: [Color(0xFF6366F1), Color(0xFF8B5CF6)]),
+                color: loading ? AppColors.border(context) : null,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                if (loading)
+                  const SizedBox(width: 14, height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                else
+                  const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 14),
+                const SizedBox(width: 4),
+                Text(loading ? 'Çalışıyor...' : (result != null ? 'Yenile' : 'Çalıştır'),
+                    style: const TextStyle(color: Colors.white, fontSize: 11,
+                        fontWeight: FontWeight.w600)),
               ]),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: const Color(0xFF6366F1).withOpacity(0.2)),
             ),
-            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Icon(Icons.auto_awesome, color: Color(0xFF6366F1), size: 14),
-              const SizedBox(width: 8),
-              Expanded(child: Text(aiInterp,
-                  style: TextStyle(color: tp, fontSize: 12, height: 1.4))),
-            ]),
           ),
+        ]),
+        const SizedBox(height: 4),
+        Text(desc, style: TextStyle(color: ts, fontSize: 11)),
+
+        if (loading) ...[
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(3),
+            child: LinearProgressIndicator(
+                minHeight: 3, backgroundColor: border,
+                color: const Color(0xFF6366F1)),
+          ),
+        ],
+
+        if (err != null) ...[
+          const SizedBox(height: 8),
+          Text(err, style: const TextStyle(color: AppColors.danger, fontSize: 12)),
+        ],
+
+        if (result != null) ...[
+          const SizedBox(height: 10),
+          _buildScenarioCard(result, surf, border, tp, ts),
         ],
       ]),
     );
+  }
+
+  Widget _buildScenarioCard(dynamic sc, Color surf, Color border, Color tp, Color ts) {
+    final winner     = sc['winner']              as String;
+    final winnerDist = (sc['winner_distance_km'] as num).toDouble();
+    final aiInterp   = sc['ai_interpretation']   as String? ?? '';
+    final results    = (sc['results'] as List).cast<Map<String, dynamic>>();
+    final manualDist = sc['manual_distance_km'] != null
+        ? (sc['manual_distance_km'] as num).toDouble() : 0.0;
+    final improvPct  = sc['improvement_vs_manual_pct'] != null
+        ? (sc['improvement_vs_manual_pct'] as num).toDouble() : 0.0;
+    final kmSaved    = sc['km_saved'] != null
+        ? (sc['km_saved'] as num).toDouble() : 0.0;
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      // Kazanan
+      Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color:        AppColors.success.withOpacity(0.07),
+          borderRadius: BorderRadius.circular(10),
+          border:       Border.all(color: AppColors.success.withOpacity(0.3)),
+        ),
+        child: Row(children: [
+          const Icon(Icons.emoji_events_rounded, color: AppColors.success, size: 16),
+          const SizedBox(width: 8),
+          Text('${_algoLabel(winner)}  ·  ${winnerDist.toStringAsFixed(2)} km',
+              style: const TextStyle(color: AppColors.success,
+                  fontWeight: FontWeight.w700, fontSize: 13)),
+        ]),
+      ),
+      const SizedBox(height: 8),
+
+      // Tablo: Algoritma | Mesafe | Gap%best | Manuel'e göre %
+      ...results.map((r) {
+        final algo    = r['algorithm']          as String;
+        final dist    = (r['total_distance_km'] as num).toDouble();
+        final gapBest = r['gap_vs_best'] != null ? (r['gap_vs_best'] as num).toDouble() : 0.0;
+        final gapMan  = r['gap_vs_manual'] != null ? (r['gap_vs_manual'] as num).toDouble() : 0.0;
+        final isWin   = algo == winner;
+        final color   = algoColor(algo);
+        return Container(
+          margin: const EdgeInsets.only(bottom: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          decoration: BoxDecoration(
+            color:        isWin ? AppColors.success.withOpacity(0.06) : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+            border:       isWin ? Border.all(color: AppColors.success.withOpacity(0.4)) : null,
+          ),
+          child: Row(children: [
+            Container(width: 7, height: 7,
+                decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+            const SizedBox(width: 6),
+            Expanded(child: Text(_algoLabel(algo),
+                style: TextStyle(fontSize: 11,
+                    color: isWin ? AppColors.success : tp,
+                    fontWeight: isWin ? FontWeight.w700 : FontWeight.w400))),
+            Text('${dist.toStringAsFixed(2)} km',
+                style: TextStyle(fontSize: 10, color: isWin ? AppColors.success : ts)),
+            const SizedBox(width: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+              decoration: BoxDecoration(
+                color: (gapBest < 5 ? AppColors.success : gapBest < 15 ? AppColors.warn : AppColors.danger).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(5),
+              ),
+              child: Text(
+                isWin ? 'En iyi' : '+${gapBest.toStringAsFixed(1)}%',
+                style: TextStyle(
+                  fontSize: 9, fontWeight: FontWeight.w600,
+                  color: isWin ? AppColors.success : gapBest < 15 ? AppColors.warn : AppColors.danger,
+                ),
+              ),
+            ),
+            if (!isWin && gapMan > 0) ...[
+              const SizedBox(width: 4),
+              Text('-${gapMan.toStringAsFixed(1)}% manuel',
+                  style: TextStyle(fontSize: 9, color: AppColors.info)),
+            ],
+          ]),
+        );
+      }),
+
+      // Tasarruf banner
+      if (improvPct > 0 && kmSaved > 0) ...[
+        const SizedBox(height: 8),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: AppColors.success.withOpacity(0.09),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            'Manuel plana göre %${improvPct.toStringAsFixed(1)} tasarruf  ·  ${kmSaved.toStringAsFixed(1)} km kazanç',
+            style: const TextStyle(color: AppColors.success,
+                fontSize: 11, fontWeight: FontWeight.w600),
+          ),
+        ),
+      ],
+
+      if (aiInterp.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(colors: [
+              const Color(0xFF6366F1).withOpacity(0.07),
+              const Color(0xFF8B5CF6).withOpacity(0.04),
+            ]),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: const Color(0xFF6366F1).withOpacity(0.2)),
+          ),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Icon(Icons.auto_awesome, color: Color(0xFF6366F1), size: 14),
+            const SizedBox(width: 8),
+            Expanded(child: Text(aiInterp,
+                style: TextStyle(color: tp, fontSize: 12, height: 1.4))),
+          ]),
+        ),
+      ],
+    ]);
   }
 
   Widget _buildChart(Color border, Color ts) {
