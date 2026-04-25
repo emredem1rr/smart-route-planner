@@ -4,6 +4,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest_all.dart' as tz;
 import '../models/task_model.dart';
+// navigatorKey, main.dart'ta tanımlandı
+import '../../main.dart' show navigatorKey;
 
 class NotificationService {
   static final NotificationService _instance = NotificationService._internal();
@@ -30,7 +32,11 @@ class NotificationService {
     await _plugin.initialize(
       settings,
       onDidReceiveNotificationResponse: (details) {
-        // Bildirime tıklanınca yapılacaklar — ileride navigasyon eklenebilir
+        // Rota bildirimlerine tıklanınca ana ekrana yönlendir
+        final payload = details.payload ?? '';
+        if (payload == 'route') {
+          navigatorKey.currentState?.popUntil((route) => route.isFirst);
+        }
       },
     );
 
@@ -133,15 +139,15 @@ class NotificationService {
   Future<void> showNow({
     required String title,
     required String body,
-    int id = 0,
-    String type = 'general',
+    int     id      = 0,
+    String  type    = 'general',
+    String? payload,
   }) async {
     await initialize();
     await _plugin.show(
-      id,
-      title,
-      body,
+      id, title, body,
       _notifDetails('instant', 'Anlık Bildirimler'),
+      payload: payload,
     );
     _saveToHistory(title: title, body: body, type: type);
   }
@@ -193,9 +199,9 @@ class NotificationService {
       android: AndroidNotificationDetails(
         channelId,
         channelName,
-        importance:  Importance.high,
-        priority:    Priority.high,
-        icon:        '@mipmap/ic_launcher',
+        importance:       Importance.high,
+        priority:         Priority.high,
+        icon:             '@mipmap/ic_launcher',
         styleInformation: const BigTextStyleInformation(''),
       ),
     );

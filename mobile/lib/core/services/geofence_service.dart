@@ -10,7 +10,7 @@ class GeofenceService {
   factory GeofenceService() => _i;
   GeofenceService._();
 
-  static const double _triggerRadiusMeters = 300; // 300m yaklaşınca tetikle
+  static const double _triggerRadiusMeters = 500; // 500m yaklaşınca tetikle
   final Set<int> _notified = {}; // Aynı gün tekrar bildirme
   bool _running = false;
 
@@ -46,11 +46,12 @@ class GeofenceService {
       if (dist <= _triggerRadiusMeters) {
         _notified.add(task.id);
         NotificationService().showNow(
-          title: '📍 ${task.name} yakınındasın!',
-          body:  '${dist.toStringAsFixed(0)}m uzakta'
+          title:   '📍 ${task.name} durağına yaklaşıyorsunuz',
+          body:    '${dist.toStringAsFixed(0)}m uzakta'
               '${task.address.isNotEmpty ? " — ${task.address}" : ""}',
-          id:    task.id + 9000,
-          type:  'geofence',
+          id:      task.id + 9000,
+          type:    'geofence',
+          payload: 'route',
         );
       }
     }

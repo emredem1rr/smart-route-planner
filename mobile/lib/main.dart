@@ -12,6 +12,8 @@ import 'features/auth/login_screen.dart';
 import 'features/onboarding/onboarding_screen.dart';
 import 'features/tasks/task_list_screen.dart';
 
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // Status bar şeffaf
@@ -37,6 +39,7 @@ class SmartRouteApp extends StatelessWidget {
     return MaterialApp(
       title:                      'Smart Route Planner',
       debugShowCheckedModeBanner: false,
+      navigatorKey:               navigatorKey,
       theme:                      AppTheme.lightTheme,
       darkTheme:                  AppTheme.darkTheme,
       themeMode:                  settings.themeMode,
@@ -119,7 +122,6 @@ class _SplashScreenState extends State<SplashScreen>
       _init(),
       Future.delayed(const Duration(milliseconds: 1200)), // min görünüm süresi
     ]).then((_) {
-      _initDone = true;
       _navigate();
     });
   }

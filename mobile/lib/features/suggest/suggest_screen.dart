@@ -1721,6 +1721,7 @@ class _CategorySearchPageState extends State<_CategorySearchPage> {
   bool            _hasSearched = false;
   String?         _error;
   List<PlaceItem> _places      = [];
+  String          _summary     = '';
   late UserPreferences _prefs;
 
   static const _catLabels = {

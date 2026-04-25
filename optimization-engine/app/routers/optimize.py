@@ -229,3 +229,53 @@ async def run_comparison(request: OptimizeRequest) -> OptimizeResponse:
 @router.post('/optimize', response_model=OptimizeResponse)
 async def optimize_route(request: OptimizeRequest) -> OptimizeResponse:
     return await run_comparison(request)
+
+
+# ── /optimize/remaining ────────────────────────────────────────────
+from pydantic import BaseModel
+from typing   import List as PyList
+
+class RemainingRequest(BaseModel):
+    completed_task_ids: PyList[int]
+    all_tasks:          PyList[dict]       # same shape as tasks in OptimizeRequest
+    segment_times:      PyList[float] = []  # from original response
+    total_distance:     float         = 0.0
+    total_travel_time:  float         = 0.0
+
+class RemainingResponse(BaseModel):
+    success:            bool
+    remaining_count:    int    = 0
+    remaining_distance: float  = 0.0
+    remaining_time_min: float  = 0.0
+    error:              str    = ''
+
+@router.post('/optimize/remaining', response_model=RemainingResponse)
+async def remaining_route(req: RemainingRequest) -> RemainingResponse:
+    try:
+        done_ids = set(req.completed_task_ids)
+        all_tasks = req.all_tasks
+        total = len(all_tasks)
+        if total == 0:
+            return RemainingResponse(success=True)
+
+        remaining_tasks = [t for t in all_tasks if t.get('id') not in done_ids]
+        remaining_count = len(remaining_tasks)
+
+        rem_time = 0.0
+        for i, task in enumerate(all_tasks):
+            if task.get('id') in done_ids:
+                continue
+            rem_time += float(task.get('duration', 0))
+            if req.segment_times and i < len(req.segment_times):
+                rem_time += req.segment_times[i]
+
+        rem_dist = req.total_distance * remaining_count / total if total > 0 else 0.0
+
+        return RemainingResponse(
+            success            = True,
+            remaining_count    = remaining_count,
+            remaining_distance = round(rem_dist, 2),
+            remaining_time_min = round(rem_time, 1),
+        )
+    except Exception as e:
+        return RemainingResponse(success=False, error=str(e))

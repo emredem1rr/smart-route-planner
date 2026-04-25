@@ -15,9 +15,12 @@ import '../../core/constants/api_constants.dart';
 import '../../core/services/storage_service.dart';
 import '../../core/services/navigation_service.dart';
 import '../../core/models/route_result_model.dart';
+import '../../core/models/task_model.dart';
 import '../../core/services/pdf_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/providers/settings_provider.dart';
+import '../../core/services/notification_service.dart';
+import '../tasks/edit_task_screen.dart';
 
 class RouteResultScreen extends StatefulWidget {
   final OptimizeResponse response;
@@ -37,6 +40,7 @@ class _RouteResultScreenState extends State<RouteResultScreen>
   NavState? _navState;
   bool      _navActive = false;
   late Set<String>     _selectedAlgos;  // grafik filtresi
+  final MapController  _mapController = MapController();
 
   // ── İlerleme takibi ───────────────────────────────────────
   Set<int>  _completedIds  = {};
@@ -73,9 +77,29 @@ class _RouteResultScreenState extends State<RouteResultScreen>
   void _markDone(int taskId) {
     setState(() => _completedIds.add(taskId));
     _saveProgress();
-    final total = widget.response.result!.orderedTasks.length;
+    final tasks = widget.response.result!.orderedTasks;
+    final total = tasks.length;
     if (_completedIds.length >= total) {
       Future.delayed(const Duration(milliseconds: 300), _showCompletionDialog);
+      NotificationService().showNow(
+        title:   '🎉 Tüm görevler tamamlandı!',
+        body:    'Bugünkü $total görev başarıyla tamamlandı.',
+        id:      9999,
+        type:    'route_done',
+        payload: 'route',
+      );
+    } else {
+      final done = tasks.firstWhere((t) => t.id == taskId,
+          orElse: () => tasks.first);
+      final next = tasks.firstWhere((t) => !_completedIds.contains(t.id),
+          orElse: () => tasks.first);
+      NotificationService().showNow(
+        title:   '✅ ${done.name} tamamlandı',
+        body:    'Sıradaki: ${next.name}',
+        id:      taskId + 5000,
+        type:    'stop_done',
+        payload: 'route',
+      );
     }
   }
 
@@ -501,6 +525,7 @@ class _RouteResultScreenState extends State<RouteResultScreen>
       Expanded(
         child: Stack(children: [
           FlutterMap(
+            mapController: _mapController,
             options: MapOptions(
               initialCenter: LatLng(centerLat, centerLon),
               initialZoom:   13,
@@ -799,6 +824,9 @@ class _RouteResultScreenState extends State<RouteResultScreen>
           ),
         ),
         SliverToBoxAdapter(
+          child: _remainingBanner(sonuc, surf, border, tp, ts),
+        ),
+        SliverToBoxAdapter(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
             child: Row(children: [
@@ -837,6 +865,7 @@ class _RouteResultScreenState extends State<RouteResultScreen>
                     : _travelTimeBetween(i - 1, i, sonuc),
                 isDone:   isDone,
                 isActive: isActive,
+                index:    i,
               ),
             );
           },
@@ -957,7 +986,7 @@ class _RouteResultScreenState extends State<RouteResultScreen>
 
   Widget _taskCard(int order, dynamic task,
       Color surf, Color border, Color tp, Color ts,
-      {String? travelTime, bool isDone = false, bool isActive = false}) {
+      {String? travelTime, bool isDone = false, bool isActive = false, int index = 0}) {
     final prioColor  = isDone ? AppColors.success : isActive
         ? const Color(0xFF3B82F6) : _priorityColor(task.priority);
     final cardColor  = isDone
@@ -1005,7 +1034,8 @@ class _RouteResultScreenState extends State<RouteResultScreen>
             borderRadius: BorderRadius.circular(12),
             child: InkWell(
               borderRadius: BorderRadius.circular(12),
-              onTap: () => _openInMaps(task),
+              onTap:      () => _openInMaps(task),
+              onLongPress: () => _showTaskDetailSheet(task as TaskModel, index),
               child: Padding(
                 padding: const EdgeInsets.all(14),
                 child: Row(children: [
@@ -1500,6 +1530,201 @@ class _RouteResultScreenState extends State<RouteResultScreen>
       default: return AppColors.prio1;
     }
   }
+
+  // ── GÖREV 1: Görev detay bottom sheet ─────────────────────
+  void _showTaskDetailSheet(TaskModel task, int index) {
+    final tp        = AppColors.textPrimary(context);
+    final ts        = AppColors.textSecond(context);
+    final surf      = AppColors.surface(context);
+    final border    = AppColors.border(context);
+    final prioColor = _priorityColor(task.priority);
+
+    showModalBottomSheet(
+      context:         context,
+      backgroundColor: surf,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              width: 36, height: 4,
+              decoration: BoxDecoration(
+                  color: border, borderRadius: BorderRadius.circular(2))),
+            const SizedBox(height: 16),
+            Row(children: [
+              Container(
+                width: 44, height: 44,
+                decoration: BoxDecoration(
+                  color:  prioColor.withOpacity(0.12),
+                  shape:  BoxShape.circle,
+                  border: Border.all(color: prioColor.withOpacity(0.4)),
+                ),
+                child: Center(child: Text('${index + 1}',
+                    style: TextStyle(color: prioColor,
+                        fontWeight: FontWeight.w800, fontSize: 16))),
+              ),
+              const SizedBox(width: 12),
+              Expanded(child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(task.name,
+                    style: TextStyle(color: tp,
+                        fontSize: 16, fontWeight: FontWeight.w700)),
+                if (task.address.isNotEmpty) ...[
+                  const SizedBox(height: 3),
+                  Text(task.address,
+                      style: TextStyle(color: ts, fontSize: 13),
+                      maxLines: 2, overflow: TextOverflow.ellipsis),
+                ],
+              ])),
+            ]),
+            const SizedBox(height: 12),
+            Row(children: [
+              _detailChip(Icons.timer_outlined,    '${task.duration} dk',     ts),
+              const SizedBox(width: 8),
+              _detailChip(Icons.flag_rounded,      'Öncelik ${task.priority}', prioColor),
+            ]),
+            const SizedBox(height: 14),
+            Divider(color: border),
+            const SizedBox(height: 8),
+            _sheetBtn(
+              icon:  Icons.map_outlined,
+              label: 'Haritada Göster',
+              color: const Color(0xFF3D9CF5),
+              onTap: () {
+                Navigator.pop(context);
+                _tabController.animateTo(0);
+                Future.delayed(const Duration(milliseconds: 300), () {
+                  _mapController.move(
+                      LatLng(task.latitude, task.longitude), 16);
+                });
+              },
+            ),
+            const SizedBox(height: 8),
+            _sheetBtn(
+              icon:  Icons.navigation_outlined,
+              label: 'Yol Tarifi Al',
+              color: AppColors.success,
+              onTap: () {
+                Navigator.pop(context);
+                _openInMaps(task);
+              },
+            ),
+            const SizedBox(height: 8),
+            _sheetBtn(
+              icon:  Icons.edit_outlined,
+              label: 'Görevi Düzenle',
+              color: AppColors.orange,
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(context, MaterialPageRoute(
+                    builder: (_) => EditTaskScreen(task: task)));
+              },
+            ),
+            const SizedBox(height: 8),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _detailChip(IconData icon, String label, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color:        color.withOpacity(0.10),
+        borderRadius: BorderRadius.circular(8),
+        border:       Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, size: 13, color: color),
+        const SizedBox(width: 5),
+        Text(label, style: TextStyle(color: color,
+            fontSize: 12, fontWeight: FontWeight.w600)),
+      ]),
+    );
+  }
+
+  Widget _sheetBtn({
+    required IconData    icon,
+    required String      label,
+    required Color       color,
+    required VoidCallback onTap,
+  }) {
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: onTap,
+        icon:  Icon(icon, size: 18, color: color),
+        label: Text(label, style: TextStyle(
+            color: color, fontSize: 14, fontWeight: FontWeight.w600)),
+        style: OutlinedButton.styleFrom(
+          padding:         const EdgeInsets.symmetric(vertical: 12),
+          side:            BorderSide(color: color.withOpacity(0.4)),
+          shape:           RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12)),
+          backgroundColor: color.withOpacity(0.05),
+        ),
+      ),
+    );
+  }
+
+  // ── GÖREV 2: Kalan rota banner ─────────────────────────────
+  Widget _remainingBanner(RouteResult sonuc,
+      Color surf, Color border, Color tp, Color ts) {
+    final total     = _orderedTasks.length;
+    final done      = _completedIds.length;
+    final remaining = total - done;
+
+    if (remaining <= 0 || done == 0) return const SizedBox.shrink();
+
+    double remTime = 0;
+    for (int i = 0; i < _orderedTasks.length; i++) {
+      final task = _orderedTasks[i] as TaskModel;
+      if (_completedIds.contains(task.id)) continue;
+      remTime += task.duration.toDouble();
+      if (sonuc.segmentTimes != null && i < sonuc.segmentTimes!.length) {
+        remTime += sonuc.segmentTimes![i];
+      }
+    }
+    final remDist = total > 0 ? sonuc.totalDistance * remaining / total : 0.0;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              const Color(0xFF3B82F6).withOpacity(0.12),
+              const Color(0xFF6366F1).withOpacity(0.07),
+            ],
+            begin: Alignment.centerLeft,
+            end:   Alignment.centerRight,
+          ),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+              color: const Color(0xFF3B82F6).withOpacity(0.35)),
+        ),
+        child: Row(children: [
+          const Icon(Icons.directions_run_rounded,
+              size: 16, color: Color(0xFF3B82F6)),
+          const SizedBox(width: 8),
+          Text('Kalan: ', style: TextStyle(
+              color: tp, fontSize: 12, fontWeight: FontWeight.w600)),
+          Text('$remaining durak',
+              style: const TextStyle(color: Color(0xFF3B82F6),
+                  fontSize: 12, fontWeight: FontWeight.w700)),
+          Text('  |  ~${remDist.toStringAsFixed(1)} km',
+              style: TextStyle(color: ts, fontSize: 12)),
+          Text('  |  ~${remTime.toStringAsFixed(0)} dk',
+              style: TextStyle(color: ts, fontSize: 12)),
+        ]),
+      ),
+    );
+  }
 }
 
 class _NavBanner extends StatelessWidget {
@@ -1523,8 +1748,8 @@ class _NavBanner extends StatelessWidget {
                   fontWeight: FontWeight.w700, fontSize: 13),
               maxLines: 1, overflow: TextOverflow.ellipsis),
           Text(
-            '\${state.distanceLabel} uzakta  ·  \${state.etaLabel}  ·  '
-                '\${state.currentTaskIdx + 1}/\${state.totalTasks}. durak',
+            '${state.distanceLabel} uzakta  ·  ${state.etaLabel}  ·  '
+                '${state.currentTaskIdx + 1}/${state.totalTasks}. durak',
             style: const TextStyle(color: Colors.white70, fontSize: 11),
           ),
         ])),
