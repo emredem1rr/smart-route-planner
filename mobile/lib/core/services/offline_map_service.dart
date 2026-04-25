@@ -1,6 +1,4 @@
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
-import 'package:latlong2/latlong.dart';
-import 'package:http/http.dart' as http;
 
 /// Harita tile'larını önceden indirip cache'ler
 /// flutter_map otomatik olarak bu cache'i kullanır
@@ -129,7 +127,7 @@ class OfflineMapService {
   /// Cache boyutunu MB cinsinden döner
   static Future<double> getCacheSizeMB() async {
     try {
-      final info = await _cacheManager.getFileFromCache('__size_check__');
+      await _cacheManager.getFileFromCache('__size_check__');
       return 0;
     } catch (_) {
       return 0;

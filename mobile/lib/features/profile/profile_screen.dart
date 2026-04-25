@@ -4,7 +4,6 @@ import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:provider/provider.dart';
 import '../../core/services/auth_service.dart';
-import '../../core/services/storage_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/providers/settings_provider.dart';
 import '../../core/services/offline_map_service.dart';
@@ -17,8 +16,7 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  final AuthService    _authService = AuthService();
-  final StorageService _storage     = StorageService();
+  final AuthService _authService = AuthService();
 
   Map<String, dynamic>? _profile;
   bool   _loading   = true;

@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(grep -E '\\\\.\\(dart|yaml|lock|json\\)$')"
+      "Bash(grep -E '\\\\.\\(dart|yaml|lock|json\\)$')",
+      "Bash(dart analyze *)",
+      "Bash(python -c ' *)",
+      "PowerShell(dart analyze *)"
     ]
   }
 }

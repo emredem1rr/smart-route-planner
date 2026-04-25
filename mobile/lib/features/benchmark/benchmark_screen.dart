@@ -73,7 +73,6 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
 
   // ── Özel dataset yükleme ──────────────────────────────────
   List<List<double>> _customCoords  = [];
-  String             _customName    = '';
   bool               _customLoading = false;
   String?            _customError;
   List<dynamic>      _customResults = [];
@@ -1308,7 +1307,7 @@ class _BenchmarkScreenState extends State<BenchmarkScreen> {
             borderRadius: BorderRadius.circular(8),
           ),
           child: Text(
-            'Manuel plana göre %${improvPct.toStringAsFixed(1)} tasarruf  ·  ${kmSaved.toStringAsFixed(1)} km kazanç',
+            'Manuel ${manualDist.toStringAsFixed(1)} km → Optimize ${winnerDist.toStringAsFixed(1)} km  ·  %${improvPct.toStringAsFixed(1)} tasarruf (${kmSaved.toStringAsFixed(1)} km)',
             style: const TextStyle(color: AppColors.success,
                 fontSize: 11, fontWeight: FontWeight.w600),
           ),

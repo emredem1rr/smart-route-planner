@@ -24,7 +24,7 @@ import '../../core/providers/settings_provider.dart';
 import '../route/route_result_screen.dart';
 import '../auth/login_screen.dart';
 import '../calendar/calendar_screen.dart';
-import '../profile/profile_screen.dart' hide EditTaskScreen;
+import '../profile/profile_screen.dart';
 import '../benchmark/benchmark_screen.dart';
 import 'add_task_screen.dart';
 import 'edit_task_screen.dart';
@@ -35,7 +35,6 @@ import '../../core/services/background_task_service.dart';
 class _K {
   // Sabit
   static const indigo      = Color(0xFF6366F1);
-  static const indigoDark  = Color(0xFF4F46E5);
   static const violet      = Color(0xFF8B5CF6);
   static const success     = Color(0xFF10B981);
   static const warn        = Color(0xFFF59E0B);
@@ -100,19 +99,19 @@ class _TaskListScreenState extends State<TaskListScreen> {
   bool   _opt       = false;
   bool   _loading   = true;
   bool   _online    = true;
-  String _userName  = '';
 
   // Rota cache
   OptimizeResponse? _cachedResult;
-  String _cachedHash = '';
 
   Position? _lastPos;
   static const _reroute = 100.0;
 
   final _searchCtrl   = TextEditingController();
-  String _searchQuery = '';
-  String _sortMode    = 'time';
-  bool   _searchOpen  = false;
+  String  _searchQuery       = '';
+  String  _sortMode          = 'time';
+  bool    _searchOpen        = false;
+  String? _selectedAlgorithm;   // null = otomatik seçim
+  bool    _useTraffic        = false;
 
   String get _today {
     final n = DateTime.now();
@@ -129,10 +128,9 @@ class _TaskListScreenState extends State<TaskListScreen> {
   @override
   void initState() {
     super.initState();
-    _storage.getUserName().then((n) => setState(() => _userName = n ?? ''));
     _loadTasks();
     Connectivity().checkConnectivity().then((r) =>
-        setState(() => _online = r != ConnectivityResult.none));
+        setState(() => _online = r.any((c) => c != ConnectivityResult.none)));
     Connectivity().onConnectivityChanged.listen((r) {
       final on = r != ConnectivityResult.none;
       setState(() => _online = on);
@@ -216,24 +214,24 @@ class _TaskListScreenState extends State<TaskListScreen> {
     if (cachedJson != null && cachedJson.isNotEmpty && cachedHash == hash) {
       try {
         final data = jsonDecode(cachedJson) as Map<String, dynamic>;
-        if (mounted) setState(() { _cachedResult = OptimizeResponse.fromJson(data); _cachedHash = hash; });
+        if (mounted) setState(() { _cachedResult = OptimizeResponse.fromJson(data); });
         return;
       } catch (_) {}
     }
-    if (mounted) setState(() { _cachedResult = null; _cachedHash = ''; });
+    if (mounted) setState(() { _cachedResult = null; });
   }
 
   Future<void> _saveRouteCache(OptimizeResponse r) async {
     final hash = _taskHash(_tasks);
     await _storage.setString('route_cache_json', jsonEncode(r.toJson()));
     await _storage.setString('route_cache_hash', hash);
-    setState(() { _cachedResult = r; _cachedHash = hash; });
+    setState(() { _cachedResult = r; });
   }
 
   Future<void> _clearRouteCache() async {
     await _storage.setString('route_cache_json', '');
     await _storage.setString('route_cache_hash', '');
-    if (mounted) setState(() { _cachedResult = null; _cachedHash = ''; });
+    if (mounted) setState(() { _cachedResult = null; });
   }
 
   List<TaskModel> get _filtered {
@@ -273,11 +271,39 @@ class _TaskListScreenState extends State<TaskListScreen> {
     finally { setState(() => _locLoad = false); }
   }
 
-  OptimizeRequest _req(Position p) => OptimizeRequest(
-    startLocation: StartLocation(latitude: p.latitude, longitude: p.longitude),
-    tasks: _tasks.where((t) => t.status == 'pending').toList(),
-    config: OptimizationConfig(heuristic: 'euclidean', useRealRoads: _online),
-  );
+  // ── Algoritma önerisi ─────────────────────────────────────
+  static String suggestAlgorithm(int taskCount) {
+    if (taskCount <= 3)  return 'lin_kernighan';
+    if (taskCount <= 7)  return 'genetic';
+    if (taskCount <= 12) return 'simulated_annealing';
+    return 'ant_colony';
+  }
+
+  static String algoLabel(String key) {
+    const m = {
+      'lin_kernighan':       'Lin-Kernighan',
+      'genetic':             'Genetik Algoritma',
+      'simulated_annealing': 'Simüle Tavlama',
+      'ant_colony':          'Karınca Kolonisi',
+      'tabu_search':         'Tabu Arama',
+    };
+    return m[key] ?? key;
+  }
+
+  OptimizeRequest _req(Position p) {
+    final pending = _tasks.where((t) => t.status == 'pending').toList();
+    final algo    = _selectedAlgorithm ?? suggestAlgorithm(pending.length);
+    return OptimizeRequest(
+      startLocation: StartLocation(latitude: p.latitude, longitude: p.longitude),
+      tasks: pending,
+      config: OptimizationConfig(
+        heuristic:         'euclidean',
+        useRealRoads:      _online,
+        useTraffic:        _useTraffic,
+        selectedAlgorithm: algo,
+      ),
+    );
+  }
 
   Future<void> _autoOpt(Position p) async {
     _lastPos = p;
@@ -1019,8 +1045,12 @@ class _TaskListScreenState extends State<TaskListScreen> {
 
   // ── Optimize bar ──────────────────────────────────────────────────
   Widget _optimizeBar(bool dark) {
-    final ready     = !_opt && _tasks.isNotEmpty && _pos != null;
+    final pending   = _tasks.where((t) => t.status == 'pending').toList();
+    final ready     = !_opt && pending.isNotEmpty && _pos != null;
     final hasCached = _cachedResult != null;
+    final suggested = suggestAlgorithm(pending.length);
+    final displayAlgo = _selectedAlgorithm ?? suggested;
+
     return Container(
       color: _K.bg(dark),
       padding: const EdgeInsets.fromLTRB(16, 8, 90, 12),
@@ -1046,8 +1076,48 @@ class _TaskListScreenState extends State<TaskListScreen> {
             ]),
           ),
         ],
+        // Algoritma önerisi chip (cache yoksa göster)
+        if (!hasCached && pending.isNotEmpty) ...[
+          Row(children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: _K.indigoSoft(dark),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: _K.indigo.withOpacity(0.3)),
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.bolt_rounded, color: _K.indigo, size: 12),
+                const SizedBox(width: 4),
+                Text(
+                  '${algoLabel(displayAlgo)} önerilir',
+                  style: const TextStyle(
+                      color: _K.indigo, fontSize: 11, fontWeight: FontWeight.w600),
+                ),
+              ]),
+            ),
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: () => _showAlgoSelector(dark),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: _K.surf2(dark),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: _K.border(dark)),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.tune_rounded, color: _K.text2(dark), size: 12),
+                  const SizedBox(width: 4),
+                  Text('Değiştir', style: TextStyle(color: _K.text2(dark), fontSize: 11)),
+                ]),
+              ),
+            ),
+          ]),
+          const SizedBox(height: 6),
+        ],
         GestureDetector(
-          onTap: _opt ? null : (hasCached ? _showCachedRoute : _optimize),
+          onTap: _opt ? null : (hasCached ? _showCachedRoute : _showOptimizeSummary),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 300),
             padding: const EdgeInsets.symmetric(vertical: 14),
@@ -1068,8 +1138,8 @@ class _TaskListScreenState extends State<TaskListScreen> {
               const SizedBox(width: 8),
               Text(
                 _opt       ? 'Optimize ediliyor...'
-                : hasCached ? 'Rotayı Göster  (${_tasks.length})'
-                : 'Rotayı Optimize Et  (${_tasks.length})',
+                : hasCached ? 'Rotayı Göster  (${pending.length})'
+                : 'Rotayı Optimize Et  (${pending.length})',
                 style: TextStyle(
                     color: ready ? Colors.white : _K.text3(dark),
                     fontWeight: FontWeight.w700, fontSize: 14),
@@ -1077,6 +1147,216 @@ class _TaskListScreenState extends State<TaskListScreen> {
             ]),
           ),
         ),
+      ]),
+    );
+  }
+
+  void _showAlgoSelector(bool dark) {
+    const algos = [
+      ('lin_kernighan',       'Lin-Kernighan',    '1–3 görev için ideal'),
+      ('genetic',             'Genetik Algoritma','4–7 görev için ideal'),
+      ('simulated_annealing', 'Simüle Tavlama',   '8–12 görev için ideal'),
+      ('ant_colony',          'Karınca Kolonisi',  '12+ görev için ideal'),
+      ('tabu_search',         'Tabu Arama',        'Genel amaçlı'),
+    ];
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: _K.surf(dark),
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(width: 36, height: 4,
+              decoration: BoxDecoration(
+                  color: _K.border(dark), borderRadius: BorderRadius.circular(2))),
+          const SizedBox(height: 16),
+          Text('Algoritma Seç',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700,
+                  color: _K.text(dark))),
+          const SizedBox(height: 4),
+          Text('Otomatik seçim için "Önerilen" seçin',
+              style: TextStyle(fontSize: 12, color: _K.text2(dark))),
+          const SizedBox(height: 16),
+          // Otomatik seçim
+          _algoTile(null, 'Otomatik (önerilen)', 'Görev sayısına göre en iyisi seçilir', dark),
+          ...algos.map((e) => _algoTile(e.$1, e.$2, e.$3, dark)),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
+  }
+
+  Widget _algoTile(String? key, String label, String subtitle, bool dark) {
+    final isSelected = _selectedAlgorithm == key;
+    return ListTile(
+      dense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      leading: Container(
+        width: 32, height: 32,
+        decoration: BoxDecoration(
+          color: isSelected ? _K.indigo.withOpacity(0.12) : _K.surf2(dark),
+          shape: BoxShape.circle,
+        ),
+        child: Icon(
+          isSelected ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+          color: isSelected ? _K.indigo : _K.text3(dark), size: 16,
+        ),
+      ),
+      title: Text(label,
+          style: TextStyle(
+              fontSize: 13, fontWeight: FontWeight.w600,
+              color: isSelected ? _K.indigo : _K.text(dark))),
+      subtitle: Text(subtitle,
+          style: TextStyle(fontSize: 11, color: _K.text2(dark))),
+      onTap: () {
+        setState(() => _selectedAlgorithm = key);
+        Navigator.pop(context);
+      },
+    );
+  }
+
+  void _showOptimizeSummary() {
+    if (_pos == null) { _snack('Konum alınmadı', _K.danger); return; }
+    final pending  = _tasks.where((t) => t.status == 'pending').toList();
+    if (pending.isEmpty) { _snack('Bugün görev yok', _K.danger); return; }
+    final dark     = context.read<SettingsProvider>().isDark;
+    final suggested = suggestAlgorithm(pending.length);
+    final displayAlgo = _selectedAlgorithm ?? suggested;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: _K.surf(dark),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setSheet) => Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(width: 36, height: 4,
+                decoration: BoxDecoration(
+                    color: _K.border(dark), borderRadius: BorderRadius.circular(2))),
+            const SizedBox(height: 16),
+            // Başlık
+            Row(children: [
+              Container(
+                width: 36, height: 36,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                      colors: [_K.indigo, _K.violet],
+                      begin: Alignment.topLeft, end: Alignment.bottomRight),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.route_rounded, color: Colors.white, size: 18),
+              ),
+              const SizedBox(width: 12),
+              Text('📋 Rota Özeti',
+                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700,
+                      color: _K.text(dark))),
+            ]),
+            const SizedBox(height: 20),
+            // Görev sayısı
+            _summaryRow(Icons.task_alt_rounded, '${pending.length} görev optimize edilecek',
+                _K.indigo, dark),
+            const SizedBox(height: 10),
+            // Algoritma
+            _summaryRow(Icons.bolt_rounded,
+                '⚡ ${algoLabel(displayAlgo)} algoritması kullanılacak',
+                _K.violet, dark),
+            const SizedBox(height: 10),
+            // İnternet
+            _summaryRow(
+                _online ? Icons.wifi_rounded : Icons.wifi_off_rounded,
+                _online ? 'Gerçek yol mesafeleri aktif' : 'Çevrimdışı — tahmini mesafe',
+                _online ? _K.success : _K.warn, dark),
+            const SizedBox(height: 10),
+            // Trafik toggle
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: _K.surf2(dark),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: _K.border(dark)),
+              ),
+              child: Row(children: [
+                Icon(Icons.traffic_rounded,
+                    color: _useTraffic ? _K.success : _K.text2(dark), size: 18),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    _useTraffic ? '🚦 Trafik verisi aktif' : '🚦 Trafik verisi pasif',
+                    style: TextStyle(
+                        fontSize: 13, color: _K.text(dark), fontWeight: FontWeight.w500),
+                  ),
+                ),
+                Switch(
+                  value:    _useTraffic,
+                  onChanged: (v) {
+                    setState(() => _useTraffic = v);
+                    setSheet(() {});
+                  },
+                  activeColor: _K.success,
+                ),
+              ]),
+            ),
+            const SizedBox(height: 20),
+            // Butonlar
+            Row(children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _K.text2(dark),
+                    side: BorderSide(color: _K.border(dark)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                  ),
+                  child: const Text('İptal'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                flex: 2,
+                child: ElevatedButton(
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    _optimize();
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _K.indigo,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                  ),
+                  child: const Text('Optimize Et',
+                      style: TextStyle(fontWeight: FontWeight.w700)),
+                ),
+              ),
+            ]),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _summaryRow(IconData icon, String text, Color color, bool dark) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.07),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withOpacity(0.2)),
+      ),
+      child: Row(children: [
+        Icon(icon, color: color, size: 16),
+        const SizedBox(width: 10),
+        Expanded(child: Text(text,
+            style: TextStyle(fontSize: 13, color: _K.text(dark),
+                fontWeight: FontWeight.w500))),
       ]),
     );
   }

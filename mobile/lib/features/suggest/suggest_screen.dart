@@ -157,8 +157,6 @@ class _SuggestScreenState extends State<SuggestScreen> with AutomaticKeepAliveCl
   static final Map<String, List<PlaceItem>> _globalCache        = {};
   static final Map<String, String>          _globalSummaryCache = {};
 
-  String get _cacheKey => '${_activeCategories.toList()..sort()}|$_subcategory|$_radiusKm';
-
   @override
   bool get wantKeepAlive => true;
 
@@ -461,76 +459,6 @@ class _SuggestScreenState extends State<SuggestScreen> with AutomaticKeepAliveCl
       setState(() => _catPlaces[_category]?.removeWhere((p) => p.placeId == '__loading__'));
       _snack('Bağlantı hatası.', error: true);
     }
-  }
-
-  Future<int?> _askDuration(String placeName) async {
-    int selected = 60;
-    return await showDialog<int>(
-      context: context,
-      builder: (_) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          backgroundColor: AppColors.surface(context),
-          title: Text(
-            placeName,
-            style: TextStyle(
-              color: AppColors.textPrimary(context),
-              fontSize: 15, fontWeight: FontWeight.w700,
-            ),
-            maxLines: 1, overflow: TextOverflow.ellipsis,
-          ),
-          content: Column(mainAxisSize: MainAxisSize.min, children: [
-            Text('Bu mekanda ne kadar vakit geçireceksin?',
-                style: TextStyle(color: AppColors.textSecond(context), fontSize: 13)),
-            const SizedBox(height: 16),
-            Wrap(
-              spacing: 8, runSpacing: 8,
-              children: [30, 60, 90, 120, 180].map((min) {
-                final label = min < 60
-                    ? '$min dk'
-                    : min == 60 ? '1 saat'
-                    : min == 90 ? '1.5 saat'
-                    : '${min ~/ 60} saat';
-                final isSel = selected == min;
-                return GestureDetector(
-                  onTap: () => setDialogState(() => selected = min),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: isSel ? const Color(0xFF6366F1) : Colors.transparent,
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                        color: isSel ? const Color(0xFF6366F1) : AppColors.border(context),
-                      ),
-                    ),
-                    child: Text(label,
-                      style: TextStyle(
-                        color: isSel ? Colors.white : AppColors.textSecond(context),
-                        fontWeight: isSel ? FontWeight.w700 : FontWeight.w400,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ),
-                );
-              }).toList(),
-            ),
-          ]),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, null),
-              child: Text('İptal', style: TextStyle(color: AppColors.textSecond(context))),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(context, selected),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF6366F1), foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              ),
-              child: const Text('Tamam'),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   Future<void> _optimizeRoute() async {
@@ -1787,13 +1715,11 @@ class _CategorySearchPage extends StatefulWidget {
 class _CategorySearchPageState extends State<_CategorySearchPage> {
   final _cityCtrl     = TextEditingController();
   final _districtCtrl = TextEditingController();
-  List<String>    _cityHistory = [];
   String          _subcategory = '';
   int             _radiusKm   = 0;
   bool            _loading     = false;
   bool            _hasSearched = false;
   String?         _error;
-  String          _summary     = '';
   List<PlaceItem> _places      = [];
   late UserPreferences _prefs;
 
@@ -1840,30 +1766,12 @@ class _CategorySearchPageState extends State<_CategorySearchPage> {
   @override
   void initState() {
     super.initState();
-    _loadCatCityHistory();
     _prefs = widget.preferences;
     _cityCtrl.text     = widget.city;
     _districtCtrl.text = widget.district;
     if (widget.city.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _search());
     }
-  }
-
-  Future<void> _loadCatCityHistory() async {
-    final prefs = await SharedPreferences.getInstance();
-    if (mounted) setState(() {
-      _cityHistory = prefs.getStringList('city_history') ?? [];
-    });
-  }
-
-  Future<void> _saveCatCityHistory(String city) async {
-    if (city.isEmpty) return;
-    _cityHistory.remove(city);
-    _cityHistory.insert(0, city);
-    if (_cityHistory.length > 8) _cityHistory = _cityHistory.sublist(0, 8);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList('city_history', _cityHistory);
-    if (mounted) setState(() {});
   }
 
   @override
@@ -2192,7 +2100,6 @@ class _PrefsSheetState extends State<_PrefsSheet> {
   Widget build(BuildContext context) {
     final tp     = AppColors.textPrimary(context);
     final ts     = AppColors.textSecond(context);
-    final surf   = AppColors.surface(context);
     final border = AppColors.border(context);
 
     return DraggableScrollableSheet(

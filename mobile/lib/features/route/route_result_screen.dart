@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'dart:convert';
@@ -10,6 +11,7 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:provider/provider.dart';
+import '../../core/constants/api_constants.dart';
 import '../../core/services/storage_service.dart';
 import '../../core/services/navigation_service.dart';
 import '../../core/models/route_result_model.dart';
@@ -36,6 +38,10 @@ class _RouteResultScreenState extends State<RouteResultScreen>
   bool      _navActive = false;
   late Set<String>     _selectedAlgos;  // grafik filtresi
 
+  // ── İlerleme takibi ───────────────────────────────────────
+  Set<int>  _completedIds  = {};
+  String    _progressKey   = '';
+
   @override
   void initState() {
     super.initState();
@@ -43,8 +49,83 @@ class _RouteResultScreenState extends State<RouteResultScreen>
     _orderedTasks  = List.from(widget.response.result!.orderedTasks);
     _selectedAlgos = widget.response.comparisonLogs
         .map((l) => l.algorithm).toSet();
-    // Rota geçmişine kaydet
-    WidgetsBinding.instance.addPostFrameCallback((_) => _saveHistory());
+    final sonuc = widget.response.result!;
+    _progressKey = 'rp_${sonuc.algorithmUsed}_'
+        '${sonuc.orderedTasks.map((t) => t.id).join('_')}';
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _saveHistory();
+      _loadProgress();
+    });
+  }
+
+  Future<void> _loadProgress() async {
+    final prefs = await SharedPreferences.getInstance();
+    final ids   = prefs.getStringList(_progressKey) ?? [];
+    if (mounted) setState(() => _completedIds = ids.map(int.parse).toSet());
+  }
+
+  Future<void> _saveProgress() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(
+        _progressKey, _completedIds.map((id) => id.toString()).toList());
+  }
+
+  void _markDone(int taskId) {
+    setState(() => _completedIds.add(taskId));
+    _saveProgress();
+    final total = widget.response.result!.orderedTasks.length;
+    if (_completedIds.length >= total) {
+      Future.delayed(const Duration(milliseconds: 300), _showCompletionDialog);
+    }
+  }
+
+  void _markUndone(int taskId) {
+    setState(() => _completedIds.remove(taskId));
+    _saveProgress();
+  }
+
+  void _showCompletionDialog() {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        backgroundColor: AppColors.surface(context),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          const SizedBox(height: 8),
+          const Text('🎉', style: TextStyle(fontSize: 56)),
+          const SizedBox(height: 12),
+          Text('Tüm görevler tamamlandı!',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                  fontSize: 18, fontWeight: FontWeight.w800,
+                  color: AppColors.textPrimary(context))),
+          const SizedBox(height: 8),
+          Text(
+            '${widget.response.result!.orderedTasks.length} durak başarıyla tamamlandı. Harika iş!',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+                fontSize: 13, color: AppColors.textSecond(context)),
+          ),
+          const SizedBox(height: 20),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.success,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 32, vertical: 12),
+            ),
+            child: const Text('Harika! 🚀',
+                style: TextStyle(fontWeight: FontWeight.w700)),
+          ),
+          const SizedBox(height: 4),
+        ]),
+      ),
+    );
   }
 
   void _startNavigation() {
@@ -79,14 +160,13 @@ class _RouteResultScreenState extends State<RouteResultScreen>
     try {
       final token = await StorageService().getToken();
       final now   = DateTime.now();
-      final now2  = DateTime.now();
-      final date  = '${now2.year}-${now2.month.toString().padLeft(2, '0')}-${now2.day.toString().padLeft(2, '0')}';
+      final date  = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
       final names = sonuc.orderedTasks.map((t) => t.name).join(', ');
       await http.post(
-        Uri.parse('\${ApiConstants.baseUrl}/routes/history'),
+        Uri.parse('${ApiConstants.baseUrl}/routes/history'),
         headers: {
           'Content-Type':  'application/json',
-          'Authorization': 'Bearer \$token',
+          'Authorization': 'Bearer $token',
         },
         body: jsonEncode({
           'task_date':         date,
@@ -108,15 +188,6 @@ class _RouteResultScreenState extends State<RouteResultScreen>
     _navService.stop();
     _tabController.dispose();
     super.dispose();
-  }
-
-  // İki görev arasındaki seyahat süresini hesapla (dist_matrix yok ama
-  // toplam süreyi n'e bölerek ortalama verebiliriz)
-  String _travelTime(int fromIdx) {
-    final sonuc = widget.response.result!;
-    if (sonuc.orderedTasks.isEmpty) return '';
-    final avgMin = sonuc.totalTravelTime / (sonuc.orderedTasks.length + 1);
-    return '~${avgMin.toStringAsFixed(0)} dk yol';
   }
 
   @override
@@ -720,6 +791,13 @@ class _RouteResultScreenState extends State<RouteResultScreen>
               ),
             ),
           ),
+        // ── İlerleme çubuğu ──────────────────────────────────
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+            child: _buildProgressBar(sonuc, surf, border, tp, ts),
+          ),
+        ),
         SliverToBoxAdapter(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
@@ -743,7 +821,12 @@ class _RouteResultScreenState extends State<RouteResultScreen>
             });
           },
           itemBuilder: (_, i) {
-            final task = _orderedTasks[i];
+            final task     = _orderedTasks[i];
+            final isDone   = _completedIds.contains(task.id);
+            // İlk tamamlanmamış durak = aktif
+            final firstPending = _orderedTasks.indexWhere(
+                (t) => !_completedIds.contains(t.id));
+            final isActive = !isDone && i == firstPending;
             return ReorderableDragStartListener(
               key:   ValueKey(task.id),
               index: i,
@@ -752,6 +835,8 @@ class _RouteResultScreenState extends State<RouteResultScreen>
                 travelTime: i == 0
                     ? null
                     : _travelTimeBetween(i - 1, i, sonuc),
+                isDone:   isDone,
+                isActive: isActive,
               ),
             );
           },
@@ -872,8 +957,19 @@ class _RouteResultScreenState extends State<RouteResultScreen>
 
   Widget _taskCard(int order, dynamic task,
       Color surf, Color border, Color tp, Color ts,
-      {String? travelTime}) {
-    final prioColor = _priorityColor(task.priority);
+      {String? travelTime, bool isDone = false, bool isActive = false}) {
+    final prioColor  = isDone ? AppColors.success : isActive
+        ? const Color(0xFF3B82F6) : _priorityColor(task.priority);
+    final cardColor  = isDone
+        ? AppColors.success.withOpacity(0.05)
+        : isActive
+            ? const Color(0xFF3B82F6).withOpacity(0.04)
+            : surf;
+    final cardBorder = isDone
+        ? AppColors.success.withOpacity(0.4)
+        : isActive
+            ? const Color(0xFF3B82F6).withOpacity(0.4)
+            : border;
 
     return Column(
       key: ValueKey(task.id),
@@ -883,10 +979,10 @@ class _RouteResultScreenState extends State<RouteResultScreen>
           Padding(
             padding: const EdgeInsets.only(left: 18, bottom: 2),
             child: Row(children: [
-              Container(
-                width: 1.5, height: 20,
-                color: AppColors.border(context),
-              ),
+              Container(width: 1.5, height: 20,
+                  color: isDone
+                      ? AppColors.success.withOpacity(0.4)
+                      : AppColors.border(context)),
               const SizedBox(width: 8),
               Icon(Icons.directions_car, size: 12,
                   color: AppColors.textDim(context)),
@@ -900,9 +996,9 @@ class _RouteResultScreenState extends State<RouteResultScreen>
         Container(
           margin:  const EdgeInsets.only(bottom: 8),
           decoration: BoxDecoration(
-            color:        surf,
+            color:        cardColor,
             borderRadius: BorderRadius.circular(12),
-            border:       Border.all(color: border),
+            border:       Border.all(color: cardBorder),
           ),
           child: Material(
             color: Colors.transparent,
@@ -920,11 +1016,16 @@ class _RouteResultScreenState extends State<RouteResultScreen>
                       shape:  BoxShape.circle,
                       border: Border.all(color: prioColor.withOpacity(0.4)),
                     ),
-                    child: Center(child: Text('$order',
-                        style: TextStyle(
-                            color: prioColor,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 14))),
+                    child: Center(
+                      child: isDone
+                          ? Icon(Icons.check_rounded,
+                              color: AppColors.success, size: 18)
+                          : Text('$order',
+                              style: TextStyle(
+                                  color: prioColor,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 14)),
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -934,29 +1035,130 @@ class _RouteResultScreenState extends State<RouteResultScreen>
                           Text(task.name,
                               style: TextStyle(
                                   fontWeight: FontWeight.w600,
-                                  fontSize: 14, color: tp)),
+                                  fontSize: 14,
+                                  color: isDone
+                                      ? AppColors.textDim(context)
+                                      : tp,
+                                  decoration: isDone
+                                      ? TextDecoration.lineThrough
+                                      : null)),
                           if (task.address.isNotEmpty) ...[
                             const SizedBox(height: 3),
                             Text(task.address,
                                 style: TextStyle(color: ts, fontSize: 12),
                                 maxLines: 1, overflow: TextOverflow.ellipsis),
                           ],
+                          if (task.duration != null && task.duration > 0) ...[
+                            const SizedBox(height: 3),
+                            Text('⏱ ${task.duration} dk',
+                                style: TextStyle(color: ts, fontSize: 11)),
+                          ],
                         ]),
                   ),
                   const SizedBox(width: 8),
-                  Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                    // Hizmet süresi (kullanıcının girdiği süre)
-                    const SizedBox(height: 2),
-                    // Yol tarifi ikonu
-                    Icon(Icons.open_in_new,
-                        color: AppColors.textDim(context), size: 16),
-                  ]),
+                  // Tamamlandı / geri al butonu
+                  GestureDetector(
+                    onTap: () => isDone
+                        ? _markUndone(task.id)
+                        : _markDone(task.id),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: isDone
+                            ? AppColors.success.withOpacity(0.1)
+                            : isActive
+                                ? const Color(0xFF3B82F6).withOpacity(0.1)
+                                : AppColors.surface(context),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: isDone
+                              ? AppColors.success.withOpacity(0.4)
+                              : isActive
+                                  ? const Color(0xFF3B82F6).withOpacity(0.4)
+                                  : AppColors.border(context),
+                        ),
+                      ),
+                      child: Text(
+                        isDone ? '✓ Tamam' : 'Tamamla',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: isDone
+                              ? AppColors.success
+                              : isActive
+                                  ? const Color(0xFF3B82F6)
+                                  : AppColors.textDim(context),
+                        ),
+                      ),
+                    ),
+                  ),
                 ]),
               ),
             ),
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildProgressBar(RouteResult sonuc,
+      Color surf, Color border, Color tp, Color ts) {
+    final done  = _completedIds.length;
+    final total = sonuc.orderedTasks.length;
+    final pct   = total > 0 ? done / total : 0.0;
+    final allDone = done >= total;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: allDone
+            ? AppColors.success.withOpacity(0.07)
+            : surf,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: allDone
+              ? AppColors.success.withOpacity(0.4)
+              : border,
+        ),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Icon(
+            allDone ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
+            color: allDone ? AppColors.success : AppColors.textDim(context),
+            size: 15,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            allDone
+                ? 'Tüm duraklar tamamlandı!'
+                : '$done / $total durak tamamlandı',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: allDone ? AppColors.success : tp,
+            ),
+          ),
+          const Spacer(),
+          Text('${(pct * 100).toStringAsFixed(0)}%',
+              style: TextStyle(
+                  fontSize: 12, fontWeight: FontWeight.w700,
+                  color: allDone ? AppColors.success : AppColors.textDim(context))),
+        ]),
+        const SizedBox(height: 8),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: LinearProgressIndicator(
+            value:            pct,
+            minHeight:        6,
+            backgroundColor:  AppColors.border(context),
+            valueColor: AlwaysStoppedAnimation<Color>(
+              allDone ? AppColors.success : const Color(0xFF3B82F6),
+            ),
+          ),
+        ),
+      ]),
     );
   }
 

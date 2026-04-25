@@ -81,7 +81,6 @@ class _SplashScreenState extends State<SplashScreen>
   bool   _loggedIn       = false;
   bool   _showOnboarding = false;
   String _userKey        = 'guest';
-  bool   _initDone       = false;
 
   @override
   void initState() {

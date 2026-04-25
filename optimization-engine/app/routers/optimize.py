@@ -111,11 +111,17 @@ async def run_comparison(request: OptimizeRequest) -> OptimizeResponse:
             'fitness_history'  : hist,
         }
 
-    _run('genetic',             run_genetic_algorithm,   tasks, dist_matrix, config)
-    _run('simulated_annealing', run_simulated_annealing, tasks, dist_matrix, config)
-    _run('ant_colony',          run_ant_colony,          tasks, dist_matrix, config)
-    _run('tabu_search',         run_tabu_search,         tasks, dist_matrix, config)
-    _run('lin_kernighan',       run_lin_kernighan,       tasks, dist_matrix, config)
+    _algo_map = {
+        'genetic':             (run_genetic_algorithm,   tasks, dist_matrix, config),
+        'simulated_annealing': (run_simulated_annealing, tasks, dist_matrix, config),
+        'ant_colony':          (run_ant_colony,          tasks, dist_matrix, config),
+        'tabu_search':         (run_tabu_search,         tasks, dist_matrix, config),
+        'lin_kernighan':       (run_lin_kernighan,       tasks, dist_matrix, config),
+    }
+    sel = config.selected_algorithm
+    keys_to_run = [sel] if sel and sel in _algo_map else list(_algo_map.keys())
+    for k in keys_to_run:
+        _run(k, *_algo_map[k])
 
     # ── Kazananı seç ─────────────────────────────────────────
     best_fitness  = min(r['fitness_score'] for r in results.values())

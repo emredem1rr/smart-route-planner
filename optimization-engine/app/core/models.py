@@ -27,14 +27,15 @@ class StartLocation(BaseModel):
 
 
 class OptimizationConfig(BaseModel):
-    heuristic:       str   = "euclidean"
-    population_size: int   = 100
-    generations:     int   = 200
-    mutation_rate:   float = 0.02
-    sa_initial_temp: float = 1000.0
-    sa_cooling_rate: float = 0.995
-    use_real_roads:  bool  = True
-    use_traffic:     bool  = False   # Google Distance Matrix API ile trafik
+    heuristic:          str            = "euclidean"
+    population_size:    int            = 100
+    generations:        int            = 200
+    mutation_rate:      float          = 0.02
+    sa_initial_temp:    float          = 1000.0
+    sa_cooling_rate:    float          = 0.995
+    use_real_roads:     bool           = True
+    use_traffic:        bool           = False   # Google Distance Matrix API ile trafik
+    selected_algorithm: Optional[str]  = None    # None → tüm algoritmalar, değer → sadece o
 
 
 class OptimizeRequest(BaseModel):

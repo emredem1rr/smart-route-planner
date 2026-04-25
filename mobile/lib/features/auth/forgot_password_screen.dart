@@ -19,7 +19,6 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
 
   bool _loading  = false;
   bool _codeSent = false;
-  bool _obscure  = true;
 
   @override
   void dispose() {
@@ -40,36 +39,6 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
 
     if (result['success'] == true) {
       setState(() => _codeSent = true);
-    } else {
-      _showError(result['error'] ?? 'Hata oluştu.');
-    }
-  }
-
-  Future<void> _resetPassword() async {
-    if (_codeCtrl.text.isEmpty || _passCtrl.text.isEmpty) return;
-    setState(() => _loading = true);
-
-    final result = await _authService.resetPassword(
-      email:       _emailCtrl.text.trim(),
-      resetCode:   _codeCtrl.text.trim(),
-      newPassword: _passCtrl.text,
-    );
-
-    setState(() => _loading = false);
-    if (!mounted) return;
-
-    if (result['success'] == true) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content:         const Text('Şifre başarıyla güncellendi.'),
-          backgroundColor: AppColors.success,
-          behavior:        SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-          ),
-        ),
-      );
-      Navigator.pop(context);
     } else {
       _showError(result['error'] ?? 'Hata oluştu.');
     }
@@ -244,23 +213,6 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
 }
 
 // ── Widgets ───────────────────────────────────────────────────────────────────
-
-class _SectionLabel extends StatelessWidget {
-  final String text;
-  final Color  color;
-  const _SectionLabel({required this.text, required this.color});
-
-  @override
-  Widget build(BuildContext context) => Text(
-    text,
-    style: TextStyle(
-      fontSize:      13,
-      fontWeight:    FontWeight.w600,
-      color:         color,
-      letterSpacing: 0.2,
-    ),
-  );
-}
 
 class _StepIndicator extends StatelessWidget {
   final int   step;
